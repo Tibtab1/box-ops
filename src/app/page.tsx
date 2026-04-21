@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import MapGrid from "@/components/MapGrid";
 import MapGrid3D from "@/components/MapGrid3D";
@@ -18,6 +18,7 @@ import PlaceSwitcher from "@/components/PlaceSwitcher";
 import NotificationBell from "@/components/NotificationBell";
 import UndoButton from "@/components/UndoButton";
 import Toasts, { useToasts } from "@/components/Toasts";
+import { cellsFingerprint, boxesFingerprint } from "@/lib/fingerprint";
 import ViewToggle, {
   readStoredViewMode,
   type ViewMode,
@@ -95,50 +96,119 @@ export default function HomePage() {
   // Shorthand for "we should prevent any mutating action right now"
   const isReadOnly3D = tab === "map" && viewMode === "3d";
 
-  const refresh = useCallback(async () => {
-    const [locRes, boxRes, placesRes, activeRes] = await Promise.all([
-      fetch("/api/locations").then((r) => r.json()),
-      fetch("/api/boxes").then((r) => r.json()),
-      fetch("/api/places").then((r) => (r.ok ? r.json() : [])),
-      fetch("/api/places/active").then((r) => (r.ok ? r.json() : null)),
-    ]);
-    setCells(locRes);
-    setBoxes(
-      boxRes.map(
-        (b: {
-          id: string;
-          name: string;
-          color: string;
-          tags: string[];
-          location: { code: string; row: number; col: number } | null;
-          updatedAt: string;
-        }) => ({
-          id: b.id,
-          name: b.name,
-          color: b.color,
-          tags: b.tags,
-          location: b.location,
-          updatedAt: b.updatedAt,
-        })
-      )
-    );
-    // Resolve role on active place
-    if (Array.isArray(placesRes) && activeRes?.placeId) {
-      const active = placesRes.find(
-        (p: { id: string }) => p.id === activeRes.placeId
-      );
-      if (active) {
-        setActiveRole(active.role);
+  // Fingerprints of last data we rendered. Used by silent polling to decide
+  // whether the incoming data actually changed before touching state.
+  const cellsFpRef = useRef<string>("");
+  const boxesFpRef = useRef<string>("");
+
+  const refresh = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      const silent = !!opts?.silent;
+      let locRes: unknown, boxRes: unknown, placesRes: unknown, activeRes: unknown;
+      try {
+        [locRes, boxRes, placesRes, activeRes] = await Promise.all([
+          fetch("/api/locations").then((r) => r.json()),
+          fetch("/api/boxes").then((r) => r.json()),
+          fetch("/api/places").then((r) => (r.ok ? r.json() : [])),
+          fetch("/api/places/active").then((r) => (r.ok ? r.json() : null)),
+        ]);
+      } catch {
+        // network blip in silent mode: just skip; don't trash the UI
+        if (silent) return;
+        throw new Error("Network error");
       }
-    } else if (Array.isArray(placesRes) && placesRes.length > 0) {
-      setActiveRole(placesRes[0].role);
-    }
-    setLoading(false);
-  }, []);
+
+      const newCells = (locRes as CellView[]) ?? [];
+      const mappedBoxes = ((boxRes as Array<{
+        id: string;
+        name: string;
+        color: string;
+        tags: string[];
+        location: { code: string; row: number; col: number } | null;
+        updatedAt: string;
+      }>) ?? []).map((b) => ({
+        id: b.id,
+        name: b.name,
+        color: b.color,
+        tags: b.tags,
+        location: b.location,
+        updatedAt: b.updatedAt,
+      }));
+
+      const newCellsFp = cellsFingerprint(newCells);
+      const newBoxesFp = boxesFingerprint(mappedBoxes);
+
+      // Only touch state if something actually changed. This prevents flicker
+      // when the 5s poll returns identical data (the common case).
+      if (newCellsFp !== cellsFpRef.current) {
+        cellsFpRef.current = newCellsFp;
+        setCells(newCells);
+      }
+      if (newBoxesFp !== boxesFpRef.current) {
+        boxesFpRef.current = newBoxesFp;
+        setBoxes(mappedBoxes);
+      }
+
+      // Resolve role on active place (always, it's cheap)
+      type PlaceLite = {
+        id: string;
+        role: "owner" | "admin" | "editor" | "viewer";
+      };
+      const placesList = Array.isArray(placesRes)
+        ? (placesRes as PlaceLite[])
+        : [];
+      const activePlaceId = (activeRes as { placeId?: string } | null)?.placeId;
+      if (activePlaceId) {
+        const active = placesList.find((p) => p.id === activePlaceId);
+        if (active) setActiveRole(active.role);
+      } else if (placesList.length > 0) {
+        setActiveRole(placesList[0].role);
+      }
+
+      if (!silent) setLoading(false);
+    },
+    []
+  );
 
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // ── Silent polling every 5 s ───────────────────────────────────────
+  // Keeps the plan and the box list in sync with other users' changes.
+  // We only poll when the tab is visible (avoids burning fetches in
+  // background tabs) and we skip when the user has an open create/edit
+  // form — otherwise polling could replace their in-progress data.
+  const pollPaused =
+    rightPanel.kind === "create" || rightPanel.kind === "edit";
+  useEffect(() => {
+    if (pollPaused) return;
+    let cancelled = false;
+    const POLL_MS = 5000;
+
+    function tick() {
+      if (cancelled) return;
+      if (document.visibilityState !== "visible") return;
+      refresh({ silent: true }).catch(() => {
+        // silent errors — just skip, next tick will retry
+      });
+    }
+    const interval = setInterval(tick, POLL_MS);
+
+    // Also refresh when the tab becomes visible after being hidden a while
+    function onVisibility() {
+      if (document.visibilityState === "visible") {
+        refresh({ silent: true }).catch(() => {});
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [refresh, pollPaused]);
 
   const currentCell = useMemo(() => {
     if (rightPanel.kind === "stack" || rightPanel.kind === "cell-edit") {

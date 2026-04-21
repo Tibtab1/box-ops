@@ -339,29 +339,50 @@ function LinkInvitePreview({ invite }: { invite: Invitation }) {
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      setTimeout(() => setCopied(false), 2000);
     } catch {
-      // ignore
+      // clipboard API denied or unavailable — fall back to selecting the text
+      try {
+        const el = document.createElement("textarea");
+        el.value = url;
+        el.setAttribute("readonly", "");
+        el.style.position = "absolute";
+        el.style.left = "-9999px";
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand("copy");
+        document.body.removeChild(el);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch {
+        // give up
+      }
     }
   }
 
   return (
     <>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
+        <input
+          type="text"
+          value={url}
+          readOnly
+          onFocus={(e) => e.currentTarget.select()}
+          className="flex-1 min-w-0 font-mono text-[11px] text-ink bg-paper-dark/40 border-2 border-ink/30 px-2 py-1 truncate"
+        />
         <button
           onClick={copy}
-          className="font-mono text-[11px] text-ink truncate underline hover:text-blueprint text-left"
-          title="Cliquez pour copier"
+          className={clsx(
+            "font-mono text-[10px] uppercase tracking-widest px-2.5 py-1 border-2 shrink-0 transition-all",
+            copied
+              ? "bg-blueprint text-paper border-ink"
+              : "bg-paper text-ink border-ink hover:-translate-y-0.5 hover:shadow-stamp"
+          )}
         >
-          {url}
+          {copied ? "✓ Copié" : "📋 Copier"}
         </button>
-        {copied && (
-          <span className="font-mono text-[9px] uppercase tracking-widest text-blueprint shrink-0">
-            ✓ copié
-          </span>
-        )}
       </div>
-      <div className="font-mono text-[9px] text-ink/50 uppercase tracking-widest">
+      <div className="font-mono text-[9px] text-ink/50 uppercase tracking-widest mt-1">
         {invite.maxUses !== null
           ? `${invite.usedCount}/${invite.maxUses} utilisations`
           : "usages illimités"}

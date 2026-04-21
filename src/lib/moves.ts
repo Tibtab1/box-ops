@@ -6,7 +6,7 @@ type LogMoveArgs = {
   toCode: string | null;
   fromStackIndex: number | null;
   toStackIndex: number | null;
-  reason: "create" | "move" | "detach" | "reorder";
+  reason: "create" | "move" | "detach" | "reorder" | "undo";
 };
 
 /**

@@ -1,6 +1,7 @@
 // Record a reversible action. The payload contains the INVERSE operation.
 // We keep the last 20 per user+place to bound storage.
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 
 const MAX_ENTRIES_PER_USER_PLACE = 20;
 
@@ -16,7 +17,7 @@ export async function pushUndoEntry(args: {
       userId: args.userId,
       placeId: args.placeId,
       kind: args.kind,
-      payload: args.payload,
+      payload: args.payload as Prisma.InputJsonValue,
       label: args.label,
     },
   });

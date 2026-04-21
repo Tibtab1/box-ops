@@ -14,6 +14,7 @@ import CellEditor from "@/components/CellEditor";
 import StackPicker from "@/components/StackPicker";
 import ThemeToggle from "@/components/ThemeToggle";
 import UserMenu from "@/components/UserMenu";
+import PlaceSwitcher from "@/components/PlaceSwitcher";
 import ViewToggle, {
   readStoredViewMode,
   type ViewMode,
@@ -258,6 +259,7 @@ export default function HomePage() {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            <PlaceSwitcher />
             <StatPill label="Cellules" value={stats.occupiedCells} sub={`/${stats.occupiedCells + stats.freeCells}`} tone="safety" />
             <StatPill
               label="Boîtes"

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireUserId } from "@/lib/require-user";
+import { requirePlaceAccess } from "@/lib/require-place";
 
 export const dynamic = "force-dynamic";
 
@@ -8,12 +8,12 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const auth = await requireUserId();
-  if ("error" in auth) return auth.error;
+  const r = await requirePlaceAccess();
+  if ("error" in r) return r.error;
+  const { placeId } = r.access;
 
-  // First: make sure this user actually owns the box
   const box = await prisma.box.findFirst({
-    where: { id: params.id, userId: auth.userId },
+    where: { id: params.id, placeId },
     select: { id: true },
   });
   if (!box) {
@@ -27,10 +27,8 @@ export async function GET(
   return NextResponse.json(
     moves.map((m) => ({
       id: m.id,
-      fromCode: m.fromCode,
-      toCode: m.toCode,
-      fromStackIndex: m.fromStackIndex,
-      toStackIndex: m.toStackIndex,
+      fromCode: m.fromCode, toCode: m.toCode,
+      fromStackIndex: m.fromStackIndex, toStackIndex: m.toStackIndex,
       reason: m.reason,
       createdAt: m.createdAt.toISOString(),
     }))

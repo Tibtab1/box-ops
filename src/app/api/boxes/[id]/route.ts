@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { parseTags, serializeTags } from "@/lib/types";
 import { logMove } from "@/lib/moves";
-import { requireUserId } from "@/lib/require-user";
+import { requirePlaceAccess } from "@/lib/require-place";
 
 export const dynamic = "force-dynamic";
 
@@ -10,11 +10,12 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const auth = await requireUserId();
-  if ("error" in auth) return auth.error;
+  const r = await requirePlaceAccess();
+  if ("error" in r) return r.error;
+  const { placeId } = r.access;
 
   const box = await prisma.box.findFirst({
-    where: { id: params.id, userId: auth.userId },
+    where: { id: params.id, placeId },
     include: { location: true },
   });
   if (!box) {
@@ -22,18 +23,10 @@ export async function GET(
   }
 
   let neighbors: Record<"left" | "right" | "front" | "back", unknown> = {
-    left: null,
-    right: null,
-    front: null,
-    back: null,
+    left: null, right: null, front: null, back: null,
   };
-
   let stack: Array<{
-    id: string;
-    name: string;
-    color: string;
-    stackIndex: number;
-    isSelf: boolean;
+    id: string; name: string; color: string; stackIndex: number; isSelf: boolean;
   }> = [];
   let capacity = 0;
 
@@ -46,18 +39,11 @@ export async function GET(
       orderBy: { stackIndex: "asc" },
     });
     stack = siblings.map((s) => ({
-      id: s.id,
-      name: s.name,
-      color: s.color,
-      stackIndex: s.stackIndex,
-      isSelf: s.id === box.id,
+      id: s.id, name: s.name, color: s.color,
+      stackIndex: s.stackIndex, isSelf: s.id === box.id,
     }));
 
-    const offsets: Array<{
-      key: keyof typeof neighbors;
-      dr: number;
-      dc: number;
-    }> = [
+    const offsets: Array<{ key: keyof typeof neighbors; dr: number; dc: number }> = [
       { key: "left", dr: 0, dc: -1 },
       { key: "right", dr: 0, dc: 1 },
       { key: "back", dr: -1, dc: 0 },
@@ -67,7 +53,7 @@ export async function GET(
     for (const o of offsets) {
       const loc = await prisma.location.findFirst({
         where: {
-          userId: auth.userId,
+          placeId,
           row: row + o.dr,
           col: col + o.dc,
           type: "cell",
@@ -98,9 +84,7 @@ export async function GET(
       createdAt: box.createdAt.toISOString(),
       updatedAt: box.updatedAt.toISOString(),
     },
-    neighbors,
-    stack,
-    capacity,
+    neighbors, stack, capacity,
   });
 }
 
@@ -108,13 +92,13 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const auth = await requireUserId();
-  if ("error" in auth) return auth.error;
-  const { userId } = auth;
+  const r = await requirePlaceAccess({ minRole: "editor" });
+  if ("error" in r) return r.error;
+  const { placeId } = r.access;
 
   const body = await req.json();
   const box = await prisma.box.findFirst({
-    where: { id: params.id, userId },
+    where: { id: params.id, placeId },
     include: { location: true },
   });
   if (!box) {
@@ -125,9 +109,7 @@ export async function PATCH(
   if (typeof body.name === "string") data.name = body.name.trim();
   if (typeof body.description === "string") data.description = body.description.trim();
   if (typeof body.color === "string") data.color = body.color;
-  if (typeof body.photoUrl === "string" || body.photoUrl === null) {
-    data.photoUrl = body.photoUrl;
-  }
+  if (typeof body.photoUrl === "string" || body.photoUrl === null) data.photoUrl = body.photoUrl;
   if (Array.isArray(body.tags)) data.tags = serializeTags(body.tags);
   else if (typeof body.tags === "string") data.tags = body.tags;
 
@@ -145,30 +127,19 @@ export async function PATCH(
       didRelocate = oldLocationId !== null;
     } else {
       const dest = await prisma.location.findUnique({
-        where: { userId_code: { userId, code: body.locationCode } },
+        where: { placeId_code: { placeId, code: body.locationCode } },
         include: { boxes: true },
       });
       if (!dest) {
-        return NextResponse.json(
-          { error: `Emplacement ${body.locationCode} introuvable.` },
-          { status: 400 }
-        );
+        return NextResponse.json({ error: `Emplacement ${body.locationCode} introuvable.` }, { status: 400 });
       }
       if (dest.type !== "cell" || !dest.enabled) {
-        return NextResponse.json(
-          { error: `${body.locationCode} n'est pas un emplacement actif.` },
-          { status: 400 }
-        );
+        return NextResponse.json({ error: `${body.locationCode} n'est pas un emplacement actif.` }, { status: 400 });
       }
-      if (dest.id === oldLocationId) {
-        // no move
-      } else {
+      if (dest.id !== oldLocationId) {
         const stackSize = dest.boxes.length;
         if (stackSize >= dest.capacity) {
-          return NextResponse.json(
-            { error: `L'emplacement ${body.locationCode} est plein (${dest.capacity} max).` },
-            { status: 409 }
-          );
+          return NextResponse.json({ error: `L'emplacement ${body.locationCode} est plein (${dest.capacity} max).` }, { status: 409 });
         }
         data.locationId = dest.id;
         data.stackIndex = stackSize;
@@ -191,8 +162,7 @@ export async function PATCH(
     if (didRelocate) {
       await logMove({
         boxId: box.id,
-        fromCode: oldCode,
-        toCode: newCode,
+        fromCode: oldCode, toCode: newCode,
         fromStackIndex: oldCode ? oldStackIndex : null,
         toStackIndex: newStackIndex,
         reason: newCode ? "move" : "detach",
@@ -225,11 +195,12 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const auth = await requireUserId();
-  if ("error" in auth) return auth.error;
+  const r = await requirePlaceAccess({ minRole: "editor" });
+  if ("error" in r) return r.error;
+  const { placeId } = r.access;
 
   const box = await prisma.box.findFirst({
-    where: { id: params.id, userId: auth.userId },
+    where: { id: params.id, placeId },
   });
   if (!box) return NextResponse.json({ ok: true });
 

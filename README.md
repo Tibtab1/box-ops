@@ -1,172 +1,180 @@
-# BOX·OPS — patch v9 : déploiement Vercel + Neon Postgres
+# BOX·OPS — patch v10 : multi-Lieu (Phase B, itération 1)
 
-## Ce que tu vas obtenir
+## Ce qui change
 
-Une URL du genre `https://box-ops-ton-pseudo.vercel.app` accessible depuis n'importe où, SSL automatique, 100 % gratuit à vie pour un usage perso/petite équipe.
+L'app supporte maintenant **plusieurs Lieux** par compte utilisateur.
 
-**Limites du free tier à connaître** :
-- Vercel : 100 Go de bande passante / mois (largement assez)
-- Neon Postgres : 0,5 Go de stockage à vie (tu peux y mettre des milliers de boîtes et photos compressées)
-- Si la DB n'est pas utilisée pendant 5 min sur Neon Free, elle "s'endort" et le premier accès prend 1-2 secondes pour se réveiller (pas grave pour ton usage)
+### Vocabulaire
+- **Lieu** (dans le code : `Place`) = un contenant : "Mon garage", "Cave chez papa", "Box loueur"…
+- **Boîte** (dans le code : `Box`) = un carton à l'intérieur d'un Lieu. Pas de changement.
 
-## Changements de cette version
+### Nouveautés visibles
+- **Switcher de Lieu** dans le header : un dropdown "Lieu : Mon garage ▾" qui liste tes lieux et permet de basculer
+- Tu peux **créer un nouveau lieu** directement depuis ce dropdown
+- **Page `/places`** pour gérer la liste complète : renommer, supprimer, ouvrir
+- Chaque Lieu a son propre plan indépendant (rangées, cellules, boîtes, historique)
 
-- Schéma Prisma : `provider = "postgresql"` au lieu de `sqlite`
-- Photos : **compression automatique** côté client (max 1600 px, JPEG 82 %) pour rester sous la limite de body Vercel (4,5 Mo)
-- Config Next : `output: "standalone"` pour démarrage plus rapide sur Vercel
-- Nouveau script : `npm run db:studio` pour inspecter la DB facilement
+### Système de rôles (préparé, activé à l'itération 2)
+Chaque Lieu aura trois niveaux de partage :
+- **viewer** : lecture seule
+- **editor** : peut ajouter / modifier / déplacer / supprimer des boîtes
+- **admin** : tout de editor + éditer le plan
+- **owner** : tout de admin + gérer les partages + supprimer le lieu
+
+Les routes API vérifient déjà ces rôles, mais il n'y a pas encore d'UI pour inviter des gens — ça viendra à l'itération 2.
+
+### Migration de tes données
+**Rien ne sera perdu.** La migration SQL crée automatiquement un Lieu "Mon premier lieu" pour chaque utilisateur existant et y attribue toutes ses boîtes/emplacements actuels. Tu retrouveras exactement ce que tu avais avant, simplement dans un Lieu nommé.
 
 ## Fichiers du patch
 
 ```
-prisma/schema.prisma              ← provider sqlite → postgresql
-src/components/BoxForm.tsx        ← compression image
-src/lib/image.ts                  ← NOUVEAU helper compression
-next.config.js                    ← output: standalone
-.env.example                      ← variables prod
-package.json                      ← script db:studio
+prisma/schema.prisma                                  ← nouveau schéma
+prisma/migrations/20260421200000_add_places/
+  └─ migration.sql                                    ← NOUVEAU (data migration)
+
+src/lib/require-place.ts                              ← NOUVEAU (helper scoping + rôles)
+src/components/PlaceSwitcher.tsx                      ← NOUVEAU (dropdown header)
+src/app/places/page.tsx                               ← NOUVEAU (gestion des lieux)
+
+src/app/api/places/route.ts                           ← NOUVEAU
+src/app/api/places/[id]/route.ts                      ← NOUVEAU
+src/app/api/places/active/route.ts                    ← NOUVEAU
+
+src/app/api/bootstrap/route.ts                        ← remplacé (crée un Lieu)
+src/app/api/boxes/route.ts                            ← remplacé (scopé par place)
+src/app/api/boxes/[id]/route.ts                       ← remplacé
+src/app/api/boxes/[id]/history/route.ts               ← remplacé
+src/app/api/boxes/[id]/reorder/route.ts               ← remplacé
+src/app/api/export/route.ts                           ← remplacé
+src/app/api/locations/route.ts                        ← remplacé
+src/app/api/locations/[code]/route.ts                 ← remplacé
+src/app/api/plan/route.ts                             ← remplacé
+src/app/api/search/route.ts                           ← remplacé
+src/app/print/page.tsx                                ← remplacé
+src/app/page.tsx                                      ← ajoute PlaceSwitcher
 ```
 
-## Étape par étape
+Tous les autres fichiers du projet restent inchangés (composants UI, middleware, auth, etc.).
 
-### Étape 1 — Créer un compte Neon (Postgres gratuit)
+## Installation
 
-1. Va sur [https://neon.tech/](https://neon.tech/)
-2. Clique **Sign up** → connecte-toi avec ton GitHub
-3. Il te propose de créer un projet : nomme-le **box-ops**, région **Europe (Frankfurt)** (au plus proche de toi)
-4. Sur la page d'accueil du projet, trouve **Connection string** → copie l'URL type `postgresql://...`
-5. **Important** : prends bien la version **pooled** (si on te demande, sinon l'URL par défaut marche)
+### 1) Copie les fichiers du patch
 
-Garde cette URL sous la main.
+Décompresse le zip et **écrase les fichiers existants** de ton projet `storage-box-app` avec ceux du patch. Les 3 nouveaux dossiers (`api/places/`, `app/places/`, `migrations/20260421200000_add_places/`) seront créés.
 
-### Étape 2 — Appliquer le patch en local et tester
+### 2) Aucune dépendance nouvelle
 
-1. Copie les fichiers du patch dans ton projet existant (écrase)
-2. Installe (au cas où des deps ont bougé) :
-   ```powershell
-   npm install
-   ```
-3. Modifie ton `.env` local pour pointer vers Neon :
-   ```
-   DATABASE_URL="postgresql://...ton-url-neon..."
-   AUTH_SECRET="...ta-cle-existante..."
-   AUTH_TRUST_HOST="true"
-   ```
-4. Applique les migrations sur la base Neon fraîche :
-   ```powershell
-   npx prisma migrate deploy
-   ```
-   Ça pousse toutes tes migrations existantes (`init`, `add_stacks`, `add_moves`, `add_auth`) vers Postgres. Pas de prompt cette fois parce que c'est du `deploy` (pour prod), pas du `dev`.
-5. Teste en local :
-   ```powershell
-   npm run dev
-   ```
-   Ouvre http://localhost:3000, crée un compte, vérifie que ton plan apparaît. Si tu avais des données en local SQLite, **elles sont perdues** — on recommence from scratch sur Postgres.
+Pas de `npm install` nécessaire — tout fonctionne avec les libs existantes.
 
-Si ça marche en local, passe à l'étape 3.
-
-### Étape 3 — Pousser ton code sur GitHub
-
-Depuis ton dossier `storage-box-app` dans PowerShell :
+### 3) Applique la migration
 
 ```powershell
-git init
-git add .
-git commit -m "v9 ready for deployment"
+npx prisma migrate deploy
 ```
 
-Puis crée un nouveau repo sur GitHub (privé ou public, peu importe) :
-1. Va sur [https://github.com/new](https://github.com/new)
-2. Nom : `box-ops` (ou ce que tu veux)
-3. **Ne coche rien** (ni README, ni .gitignore, ni license)
-4. Clique "Create repository"
-5. GitHub te donne 2 commandes type :
-   ```powershell
-   git remote add origin https://github.com/ton-pseudo/box-ops.git
-   git branch -M main
-   git push -u origin main
-   ```
-   Copie-colle-les dans PowerShell.
+> ⚠️ Utilise bien `migrate deploy` et **pas** `migrate dev`. La migration `migration.sql` fournie contient la logique de rapatriement des données existantes, il ne faut pas qu'elle soit régénérée par Prisma.
 
-> ⚠️ Vérifie que ton `.gitignore` contient bien `.env` avant le push ! Sinon ta clé `AUTH_SECRET` et ton URL Neon seront publiques sur GitHub.
-> Normalement c'est déjà le cas (fichier fourni), mais vérifie avec `cat .gitignore | findstr env`.
+Tu devrais voir :
+```
+Applying migration `20260421200000_add_places`
+All migrations have been successfully applied.
+```
 
-### Étape 4 — Déployer sur Vercel
+> 💡 Si jamais Prisma te dit "Database schema is not empty" et refuse, c'est probablement que tu avais créé une migration manuellement entre temps. Dis-le moi.
 
-1. Va sur [https://vercel.com/](https://vercel.com/)
-2. Clique **Sign Up** → **Continue with GitHub**
-3. Sur le dashboard, clique **Add New...** → **Project**
-4. Tu vois ton repo `box-ops` → clique **Import**
-5. **Framework Preset** : Next.js (auto-détecté)
-6. **Root Directory** : laisse `.` (racine)
-7. Déroule **Environment Variables** et ajoute ces 4 lignes :
-
-   | Name | Value |
-   |------|-------|
-   | `DATABASE_URL` | `postgresql://...` (ton URL Neon) |
-   | `AUTH_SECRET` | la clé que tu as déjà (ou génère-en une nouvelle avec `npm run auth:secret`) |
-   | `AUTH_GOOGLE_ID` | (facultatif) ton Google Client ID |
-   | `AUTH_GOOGLE_SECRET` | (facultatif) ton Google Client Secret |
-
-8. Clique **Deploy**. Ça prend 2-3 minutes. Quand c'est fini, Vercel te donne une URL du style `https://box-ops-xxxx.vercel.app`.
-
-### Étape 5 — Mettre à jour Google OAuth (si tu l'utilises)
-
-Ton URL est maintenant `https://box-ops-xxxx.vercel.app`, il faut l'autoriser dans Google Cloud :
-
-1. Va sur [https://console.cloud.google.com/](https://console.cloud.google.com/) → ton projet
-2. **APIs & Services** → **Credentials** → clique sur ton OAuth Client ID existant
-3. Dans **Authorized redirect URIs**, clique **Add URI** et ajoute :
-   ```
-   https://box-ops-xxxx.vercel.app/api/auth/callback/google
-   ```
-   (remplace par ton URL Vercel réelle)
-4. Garde aussi `http://localhost:3000/api/auth/callback/google` pour pouvoir tester en local
-5. **Save**
-
-Si tu es en mode "Testing" sur OAuth consent screen, n'oublie pas d'ajouter les emails autorisés (max 100).
-
-### Étape 6 — Tester en prod
-
-Ouvre ton URL Vercel dans un navigateur, crée un compte, connecte-toi, joue avec ton plan. Tout devrait fonctionner comme en local.
-
-## Déploiement continu
-
-Chaque `git push` sur la branche `main` redéploiera automatiquement sur Vercel. Tu peux aussi faire des branches de test qui auront chacune leur URL de prévisualisation.
-
-Pour appliquer une future migration Prisma :
+### 4) Régénère le client Prisma
 
 ```powershell
-# En local, crée la migration et teste-la
-npx prisma migrate dev --name ma_feature
+npx prisma generate
+```
 
-# Commit et push
+Cette commande crée les types TypeScript pour les nouveaux modèles `Place` et `PlaceShare`.
+
+### 5) Teste en local
+
+```powershell
+npm run dev
+```
+
+Ouvre http://localhost:3000. Tu devrais :
+- Voir ton ancien plan comme avant (tes boîtes sont là)
+- Voir un nouveau dropdown **"Lieu : Mon premier lieu"** dans le header
+- Cliquer dessus → bouton **"+ Nouveau lieu"** en bas
+- Page **`/places`** accessible via le dropdown → "⚙ Gérer mes lieux"
+
+### 6) Commit et push
+
+Quand tout marche en local :
+
+```powershell
 git add .
-git commit -m "feat: ma feature"
+git commit -m "v10: multi-Lieu (phase B iteration 1)"
 git push
 ```
 
-Vercel lance automatiquement `npm run build` qui exécute `prisma migrate deploy` → la migration est appliquée à Neon avant le nouveau déploiement. Aucune manip à faire sur Vercel ou Neon.
+Vercel détecte le push, lance `prisma migrate deploy` qui applique la migration sur Neon en production, puis build. ~2 min plus tard ton app déployée est à jour.
+
+## Premiers pas avec plusieurs Lieux
+
+### Créer un deuxième lieu
+1. Clique sur "Lieu : Mon premier lieu" dans le header
+2. Clique "+ Nouveau lieu"
+3. Tape un nom (ex: "Cave") et valide
+4. L'app recharge sur ce nouveau lieu, avec un plan vide
+
+> Ce nouveau lieu n'a **pas** de plan auto-créé. Tu dois entrer en mode "Éditer le plan" et ajouter des rangées/cellules toi-même. C'est voulu — ça te laisse configurer ton lieu aux dimensions réelles.
+
+### Renommer / Supprimer
+Via le dropdown → "⚙ Gérer mes lieux" → boutons dans la liste.
+
+> Tu ne peux pas supprimer ton dernier lieu (il t'en faut toujours un actif).
+
+## Architecture technique
+
+### `requirePlaceAccess()`
+Chaque route API qui manipule des données commence par appeler ce helper :
+1. Lit la session → userId
+2. Lit le cookie `boxops-active-place` → placeId
+3. Vérifie en DB que l'utilisateur a accès (owner ou share)
+4. Vérifie le rôle minimal requis (`viewer` par défaut, `editor` pour modifs boîtes, `admin` pour modifs plan)
+5. Retourne `{ userId, placeId, role }` ou une NextResponse d'erreur
+
+Résultat : impossible d'accéder à un Lieu auquel tu n'as pas droit, même en forgeant des cookies ou des IDs.
+
+### Cookie d'état
+Le Lieu actif est stocké dans un cookie httpOnly `boxops-active-place`. Ça veut dire :
+- Chaque onglet partage le même Lieu actif (cohérent pour un même utilisateur)
+- Quand tu changes de Lieu dans un onglet, l'autre onglet verra le nouveau à sa prochaine action
+- Le cookie est invalidé à la déconnexion
+
+### Migration SQL
+Elle fait 4 étapes :
+1. Crée tables `Place` et `PlaceShare`
+2. Insère un Lieu "Mon premier lieu" par utilisateur qui a déjà des données
+3. Ajoute une colonne `placeId` nullable sur `Location` et `Box`, puis backfill
+4. Verrouille : `NOT NULL`, `FOREIGN KEY`, nouvelle unique `(placeId, code)`, suppression des anciens index `userId`-based
+
+Elle est idempotente-safe pour les déploiements frais (Vercel qui rejoue tout sur une DB vide) parce que toutes les étapes 1-4 sont cohérentes sur une DB sans données.
 
 ## Dépannage
 
-**Le build échoue sur Vercel avec "Environment variable not found: DATABASE_URL"**
-→ Tu as oublié de coller `DATABASE_URL` dans les env vars Vercel. Va dans **Settings** → **Environment Variables**, ajoute-la, puis **Redeploy** depuis l'onglet Deployments.
+**"Prisma schema and migration drift"** après avoir copié les fichiers
+→ Supprime `node_modules/.prisma` et refais `npx prisma generate`.
 
-**"Can't reach database server" sur la page de login**
-→ L'URL Neon a un problème. Vérifie qu'elle se termine bien par `?sslmode=require` (Vercel et Neon l'exigent).
+**Le dropdown dit "—" et la page est vide**
+→ Tu n'as pas encore de Lieu. Logique si tu n'avais pas de données en v9. Recharge la page, le bootstrap va t'en créer un.
 
-**Google OAuth : "Error 400: redirect_uri_mismatch"**
-→ L'URL de callback ne correspond pas. Regarde attentivement le message d'erreur de Google, il te donne l'URL exacte à ajouter dans la console.
+**"Lieu introuvable" sur toutes les API**
+→ Ton cookie pointe vers un Lieu supprimé. Passe par `/api/places/active` POST vers un Lieu existant, ou dégage le cookie manuellement (DevTools → Application → Cookies).
 
-**"Internal Server Error" au login credentials**
-→ Vérifie les logs dans Vercel : **Deployments** → ton déploiement → **Runtime Logs**. Souvent c'est `AUTH_SECRET` manquant.
+**Le plan est vide après migration alors que j'avais des boîtes**
+→ Ouvre Prisma Studio (`npx prisma studio`) et regarde la table `Place`. Tu devrais avoir un "Mon premier lieu". Puis la table `Location` — chaque ligne doit avoir un `placeId` non nul. Si ce n'est pas le cas, la migration n'est pas passée complètement.
 
-**La DB "dort" et la première requête est lente**
-→ Normal sur Neon Free. Après quelques secondes d'activité, c'est réveillé. Pour éviter, passe à Neon Launch ($19/mois) — pas nécessaire pour ton usage.
+## Itération 2 à venir
 
-## Limites à connaître
-
-- **Photos stockées en base64 dans la DB** : simple mais lourd. Si tu dépasses 0,5 Go (des milliers de photos 2 Mo), tu paieras Neon. Pour un vrai stockage d'images à grande échelle, il faudra passer à un bucket S3/Cloudflare R2. Pour l'instant ça ira.
-- **Pas de vraie persistance des uploads** : les photos sont en DB, donc persistent normalement
-- **Pas de queue / job background** : tout est synchrone. Si tu fais évoluer l'app avec des tâches longues (envoi d'emails, etc.), il faudra un worker externe.
+- Table `PlaceShare` déjà prête → page de gestion des partages par Lieu
+- Invitation **par email** (si l'autre personne a déjà un compte)
+- Invitation **par lien unique** (génère une URL `https://box-ops.vercel.app/invite/abc123`)
+- Modification de rôle / révocation de partage
+- Notification visuelle quand quelqu'un te partage un Lieu ("X lieux partagés avec moi")

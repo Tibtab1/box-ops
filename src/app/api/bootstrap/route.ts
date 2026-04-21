@@ -1,22 +1,27 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireUserId } from "@/lib/require-user";
+import { auth } from "@/auth";
 
 export const dynamic = "force-dynamic";
 
-// POST /api/bootstrap — if the current user has no locations yet, create a
-// small starter plan. Idempotent: does nothing if the user already has cells.
+// POST /api/bootstrap — if the current user owns NO place yet, create a
+// default place "Mon premier lieu" with a starter 3×4 plan.
 export async function POST() {
-  const auth = await requireUserId();
-  if ("error" in auth) return auth.error;
-  const { userId } = auth;
+  const session = await auth();
+  const userId = (session?.user as { id?: string } | undefined)?.id;
+  if (!userId) {
+    return NextResponse.json({ error: "Non authentifié." }, { status: 401 });
+  }
 
-  const existing = await prisma.location.count({ where: { userId } });
-  if (existing > 0) {
+  const ownedCount = await prisma.place.count({ where: { ownerId: userId } });
+  if (ownedCount > 0) {
     return NextResponse.json({ ok: true, created: false });
   }
 
-  // Starter: 3 rows of 4 cells
+  const place = await prisma.place.create({
+    data: { name: "Mon premier lieu", ownerId: userId },
+  });
+
   const ROWS = 3;
   const COLS = 4;
   for (let r = 1; r <= ROWS; r++) {
@@ -24,19 +29,17 @@ export async function POST() {
     for (let c = 0; c < COLS; c++) {
       await prisma.location.create({
         data: {
-          userId,
+          placeId: place.id, userId,
           code: `${aisle}-${c + 1}`,
-          aisle,
-          slot: c + 1,
-          row: r,
-          col: c,
-          type: "cell",
-          capacity: 5,
-          enabled: true,
+          aisle, slot: c + 1,
+          row: r, col: c,
+          type: "cell", capacity: 5, enabled: true,
         },
       });
     }
   }
 
-  return NextResponse.json({ ok: true, created: true, rows: ROWS, cols: COLS });
+  return NextResponse.json({
+    ok: true, created: true, placeId: place.id,
+  });
 }

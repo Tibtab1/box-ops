@@ -1,8 +1,10 @@
 import { prisma } from "@/lib/prisma";
 import { parseTags } from "@/lib/types";
 import { auth } from "@/auth";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import PrintToolbar from "./PrintToolbar";
+import { ACTIVE_PLACE_COOKIE } from "@/lib/require-place";
 import "./print.css";
 
 export const dynamic = "force-dynamic";
@@ -14,16 +16,36 @@ export default async function PrintPage() {
     redirect("/login?next=/print");
   }
 
-  const locations = await prisma.location.findMany({
-    where: { userId },
-    include: {
-      boxes: { orderBy: { stackIndex: "asc" } },
+  // Resolve active place (cookie or fallback to first accessible)
+  let placeId = cookies().get(ACTIVE_PLACE_COOKIE)?.value ?? null;
+  if (!placeId) {
+    const first = await prisma.place.findFirst({
+      where: {
+        OR: [{ ownerId: userId }, { shares: { some: { userId } } }],
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    placeId = first?.id ?? null;
+  }
+  if (!placeId) redirect("/");
+
+  // Access check
+  const place = await prisma.place.findFirst({
+    where: {
+      id: placeId,
+      OR: [{ ownerId: userId }, { shares: { some: { userId } } }],
     },
+  });
+  if (!place) redirect("/");
+
+  const locations = await prisma.location.findMany({
+    where: { placeId },
+    include: { boxes: { orderBy: { stackIndex: "asc" } } },
     orderBy: [{ row: "asc" }, { col: "asc" }],
   });
 
   const allBoxes = await prisma.box.findMany({
-    where: { userId },
+    where: { placeId },
     include: { location: true },
     orderBy: [{ location: { code: "asc" } }, { stackIndex: "desc" }],
   });
@@ -38,19 +60,14 @@ export default async function PrintPage() {
     .sort(([a], [b]) => a - b)
     .map(([row, arr]) => {
       arr.sort((x, y) => x.col - y.col);
-      return {
-        row,
-        cells: arr,
-        minCol: arr[0].col,
-        maxCol: arr[arr.length - 1].col,
-      };
+      return { row, cells: arr, minCol: arr[0].col, maxCol: arr[arr.length - 1].col };
     });
 
   if (rowsData.length === 0) {
     return (
       <div className="print-root">
         <div className="print-header">
-          <h1 className="print-title">BOX·OPS</h1>
+          <h1 className="print-title">BOX·OPS — {place.name}</h1>
         </div>
         <p style={{ padding: "20mm 0", textAlign: "center" }}>
           Plan vide. Créez des cellules depuis l'éditeur avant d'imprimer.
@@ -62,13 +79,9 @@ export default async function PrintPage() {
   const globalMinCol = Math.min(...rowsData.map((r) => r.minCol));
   const globalMaxCol = Math.max(...rowsData.map((r) => r.maxCol));
   const totalCols = globalMaxCol - globalMinCol + 1;
-
   const now = new Date().toLocaleDateString("fr-FR", {
-    day: "2-digit",
-    month: "long",
-    year: "numeric",
+    day: "2-digit", month: "long", year: "numeric",
   });
-
   const placedCount = allBoxes.filter((b) => b.location).length;
   const unplaced = allBoxes.length - placedCount;
 
@@ -77,7 +90,7 @@ export default async function PrintPage() {
       <div className="print-header">
         <div>
           <div className="print-eyebrow">
-            Plan de stockage · {session?.user?.email ?? session?.user?.name ?? "Utilisateur"}
+            Plan de stockage · {place.name}
           </div>
           <h1 className="print-title">BOX·OPS</h1>
         </div>
@@ -114,7 +127,6 @@ export default async function PrintPage() {
                 const col = globalMinCol + idx;
                 const cell = cells.find((c) => c.col === col);
                 if (!cell) return <div key={idx} className="print-cell-empty" />;
-
                 if (cell.type === "aisle") {
                   return (
                     <div key={idx} className="print-cell print-cell-aisle">
@@ -131,42 +143,17 @@ export default async function PrintPage() {
                     </div>
                   );
                 }
-
                 const stackSize = cell.boxes.length;
                 const topBox = cell.boxes[stackSize - 1];
-
                 return (
                   <div
                     key={idx}
                     className="print-cell print-cell-storage"
-                    style={
-                      topBox
-                        ? { backgroundColor: topBox.color, color: "#fff" }
-                        : undefined
-                    }
+                    style={topBox ? { backgroundColor: topBox.color, color: "#fff" } : undefined}
                   >
                     <span className="print-cell-code">{cell.code}</span>
-                    {topBox && (
-                      <span className="print-cell-name">{topBox.name}</span>
-                    )}
-                    {stackSize > 1 && (
-                      <div className="print-stack-iso" aria-hidden>
-                        {cell.boxes.slice(0, -1).map((b, i) => (
-                          <span
-                            key={b.id}
-                            className="print-stack-layer"
-                            style={{
-                              backgroundColor: b.color,
-                              transform: `translate(${(i + 1) * 3}px, ${-(i + 1) * 3}px)`,
-                              zIndex: i,
-                            }}
-                          />
-                        ))}
-                      </div>
-                    )}
-                    {stackSize > 1 && (
-                      <span className="print-stack-count">×{stackSize}</span>
-                    )}
+                    {topBox && <span className="print-cell-name">{topBox.name}</span>}
+                    {stackSize > 1 && <span className="print-stack-count">×{stackSize}</span>}
                   </div>
                 );
               })}
@@ -189,24 +176,14 @@ export default async function PrintPage() {
           <tbody>
             {allBoxes.map((b) => (
               <tr key={b.id}>
-                <td className="print-td-code">
-                  {b.location ? b.location.code : "—"}
-                </td>
-                <td className="print-td-idx">
-                  {b.location ? `#${b.stackIndex + 1}` : ""}
-                </td>
+                <td className="print-td-code">{b.location ? b.location.code : "—"}</td>
+                <td className="print-td-idx">{b.location ? `#${b.stackIndex + 1}` : ""}</td>
                 <td>
                   <div className="print-td-name">
-                    <span
-                      className="print-swatch"
-                      style={{ backgroundColor: b.color }}
-                      aria-hidden
-                    />
+                    <span className="print-swatch" style={{ backgroundColor: b.color }} aria-hidden />
                     <span>{b.name}</span>
                   </div>
-                  {b.description && (
-                    <div className="print-td-desc">{b.description}</div>
-                  )}
+                  {b.description && <div className="print-td-desc">{b.description}</div>}
                 </td>
                 <td className="print-td-tags">
                   {parseTags(b.tags).map((t) => `#${t}`).join(" · ")}
@@ -215,7 +192,6 @@ export default async function PrintPage() {
             ))}
           </tbody>
         </table>
-
         {unplaced > 0 && (
           <p className="print-note">
             {unplaced} boîte{unplaced > 1 ? "s" : ""} sans emplacement assigné.
@@ -224,7 +200,7 @@ export default async function PrintPage() {
       </section>
 
       <div className="print-footer">
-        BOX·OPS · plan généré le {now} · pour impression A4
+        BOX·OPS · {place.name} · plan généré le {now}
       </div>
 
       <PrintToolbar />

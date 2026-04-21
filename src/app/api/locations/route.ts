@@ -1,20 +1,19 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { parseTags } from "@/lib/types";
-import { requireUserId } from "@/lib/require-user";
+import { requirePlaceAccess } from "@/lib/require-place";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const auth = await requireUserId();
-  if ("error" in auth) return auth.error;
+  const r = await requirePlaceAccess();
+  if ("error" in r) return r.error;
+  const { placeId } = r.access;
 
   const locations = await prisma.location.findMany({
-    where: { userId: auth.userId },
+    where: { placeId },
     include: {
-      boxes: {
-        orderBy: { stackIndex: "asc" },
-      },
+      boxes: { orderBy: { stackIndex: "asc" } },
     },
     orderBy: [{ row: "asc" }, { col: "asc" }],
   });

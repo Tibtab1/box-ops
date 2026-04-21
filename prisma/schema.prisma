@@ -1,6 +1,10 @@
-// Prisma schema — v9 (Postgres edition for deployment)
-// Only difference from v8: datasource provider switched from sqlite to postgresql.
-// All models stay identical; Prisma abstracts the rest.
+// Prisma schema — v10 (multi-Lieu / multi-Place)
+// Changes from v9:
+//   + Place     : a user-owned container (garage, cave, rented storage unit, ...)
+//   + PlaceShare: will power sharing in iteration 2 (role = viewer/editor/admin)
+//   - Location  : now tied to a Place (placeId) instead of directly to a User
+//   - Box       : now tied to a Place (placeId). userId kept for backwards-compat
+//                 queries (e.g. "boxes created by me") but not used for scoping.
 generator client {
   provider = "prisma-client-js"
 }
@@ -20,8 +24,10 @@ model User {
   passwordHash  String?
   accounts      Account[]
   sessions      Session[]
-  locations     Location[]
-  boxes         Box[]
+  ownedPlaces   Place[]       @relation("PlaceOwner")
+  shares        PlaceShare[]
+  locations     Location[]    // created-by, kept for compat
+  boxes         Box[]         // created-by, kept for compat
   createdAt     DateTime  @default(now())
 }
 
@@ -38,9 +44,7 @@ model Account {
   scope             String?
   id_token          String?
   session_state     String?
-
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
   @@unique([provider, providerAccountId])
 }
 
@@ -56,14 +60,43 @@ model VerificationToken {
   identifier String
   token      String   @unique
   expires    DateTime
-
   @@unique([identifier, token])
+}
+
+// ─── Place: the container ("Mon Garage", "Cave Papa", ...) ────────
+model Place {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  ownerId     String
+  owner       User     @relation("PlaceOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  shares      PlaceShare[]
+  locations   Location[]
+  boxes       Box[]
+  createdAt   DateTime @default(now())
+
+  @@index([ownerId])
+}
+
+// Reserved for iteration 2 — sharing model
+model PlaceShare {
+  id        String   @id @default(cuid())
+  placeId   String
+  userId    String
+  role      String   @default("viewer") // "viewer" | "editor" | "admin"
+  createdAt DateTime @default(now())
+  place     Place    @relation(fields: [placeId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([placeId, userId])
+  @@index([userId])
 }
 
 // ─── Domain models ─────────────────────────────────────────────────
 model Location {
   id        String   @id @default(cuid())
-  userId    String
+  placeId   String
+  userId    String   // creator, for audit/compat (not for scoping)
   code      String
   aisle     String
   slot      Int
@@ -73,16 +106,18 @@ model Location {
   capacity  Int      @default(5)
   enabled   Boolean  @default(true)
   createdAt DateTime @default(now())
+  place     Place    @relation(fields: [placeId], references: [id], onDelete: Cascade)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   boxes     Box[]
 
-  @@unique([userId, code])
-  @@index([userId, row, col])
+  @@unique([placeId, code])
+  @@index([placeId, row, col])
 }
 
 model Box {
   id          String    @id @default(cuid())
-  userId      String
+  placeId     String
+  userId      String    // creator
   name        String
   description String?
   tags        String    @default("")
@@ -90,13 +125,14 @@ model Box {
   color       String    @default("#e8602c")
   locationId  String?
   stackIndex  Int       @default(0)
+  place       Place     @relation(fields: [placeId], references: [id], onDelete: Cascade)
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   location    Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
   moves       Move[]
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  @@index([userId])
+  @@index([placeId])
   @@index([locationId, stackIndex])
 }
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireUserId } from "@/lib/require-user";
+import { requirePlaceAccess } from "@/lib/require-place";
 
 export const dynamic = "force-dynamic";
 
@@ -8,13 +8,14 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { code: string } }
 ) {
-  const auth = await requireUserId();
-  if ("error" in auth) return auth.error;
+  // Modifying a cell (type, capacity, enabled) is an admin-level action
+  const r = await requirePlaceAccess({ minRole: "admin" });
+  if ("error" in r) return r.error;
+  const { placeId } = r.access;
 
   const body = await req.json();
-  // userId+code is our unique constraint in v8
   const loc = await prisma.location.findUnique({
-    where: { userId_code: { userId: auth.userId, code: params.code } },
+    where: { placeId_code: { placeId, code: params.code } },
     include: { boxes: true },
   });
   if (!loc) {

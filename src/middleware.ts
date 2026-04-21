@@ -1,6 +1,4 @@
-// Edge-safe middleware. We instantiate NextAuth here with the edge-safe
-// config only (no bcrypt, no Prisma adapter), then use its auth helper
-// as the middleware entry.
+// Edge-safe middleware.
 import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
 import { authConfig } from "@/auth.config";
@@ -13,8 +11,10 @@ export default auth((req) => {
   const isPublic =
     pathname.startsWith("/login") ||
     pathname.startsWith("/register") ||
+    pathname.startsWith("/invite/") ||
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/api/register") ||
+    pathname.startsWith("/api/invitations/token") ||
     pathname.startsWith("/_next") ||
     pathname === "/favicon.ico";
 

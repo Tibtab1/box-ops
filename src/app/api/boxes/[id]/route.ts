@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { parseTags, serializeTags } from "@/lib/types";
 import { logMove } from "@/lib/moves";
 import { requirePlaceAccess } from "@/lib/require-place";
+import { pushUndoEntry } from "@/lib/undo";
 
 export const dynamic = "force-dynamic";
 
@@ -25,9 +26,7 @@ export async function GET(
   let neighbors: Record<"left" | "right" | "front" | "back", unknown> = {
     left: null, right: null, front: null, back: null,
   };
-  let stack: Array<{
-    id: string; name: string; color: string; stackIndex: number; isSelf: boolean;
-  }> = [];
+  let stack: Array<{ id: string; name: string; color: string; stackIndex: number; isSelf: boolean; }> = [];
   let capacity = 0;
 
   if (box.location) {
@@ -49,26 +48,15 @@ export async function GET(
       { key: "back", dr: -1, dc: 0 },
       { key: "front", dr: 1, dc: 0 },
     ];
-
     for (const o of offsets) {
       const loc = await prisma.location.findFirst({
-        where: {
-          placeId,
-          row: row + o.dr,
-          col: col + o.dc,
-          type: "cell",
-          enabled: true,
-        },
-        include: {
-          boxes: { orderBy: { stackIndex: "desc" }, take: 1 },
-        },
+        where: { placeId, row: row + o.dr, col: col + o.dc, type: "cell", enabled: true },
+        include: { boxes: { orderBy: { stackIndex: "desc" }, take: 1 } },
       });
       const top = loc?.boxes?.[0];
       if (top) {
         neighbors[o.key] = {
-          id: top.id,
-          name: top.name,
-          color: top.color,
+          id: top.id, name: top.name, color: top.color,
           tags: parseTags(top.tags),
           location: { code: loc!.code, row: loc!.row, col: loc!.col },
           stackSize: await prisma.box.count({ where: { locationId: loc!.id } }),
@@ -94,7 +82,7 @@ export async function PATCH(
 ) {
   const r = await requirePlaceAccess({ minRole: "editor" });
   if ("error" in r) return r.error;
-  const { placeId } = r.access;
+  const { placeId, userId } = r.access;
 
   const body = await req.json();
   const box = await prisma.box.findFirst({
@@ -166,6 +154,20 @@ export async function PATCH(
         fromStackIndex: oldCode ? oldStackIndex : null,
         toStackIndex: newStackIndex,
         reason: newCode ? "move" : "detach",
+      });
+      // ── UNDO: record the inverse move ────────────────────────────
+      await pushUndoEntry({
+        userId, placeId,
+        kind: "move_box",
+        payload: {
+          boxId: box.id,
+          targetLocationId: oldLocationId,
+          targetStackIndex: oldStackIndex,
+          previousCode: oldCode,
+        },
+        label: newCode
+          ? `Déplacement de « ${box.name} » vers ${newCode}`
+          : `« ${box.name} » retirée de ${oldCode}`,
       });
     }
 

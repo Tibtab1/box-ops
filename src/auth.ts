@@ -1,12 +1,12 @@
 // Full Auth.js config used by API routes and server components.
-// Extends the edge-safe config with Credentials (which needs bcrypt)
-// and the Prisma adapter (which needs node).
+// v11: on every sign-in, claim pending email invitations.
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { compare } from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { authConfig } from "@/auth.config";
+import { claimPendingInvitations } from "@/lib/claim-invitations";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
@@ -45,4 +45,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       },
     }),
   ],
+  events: {
+    // Runs on every successful sign-in (both OAuth and credentials)
+    async signIn({ user }) {
+      if (user?.id && user?.email) {
+        try {
+          await claimPendingInvitations(user.id, user.email);
+        } catch (e) {
+          // Don't block sign-in if claiming fails — log and continue
+          console.error("claimPendingInvitations failed:", e);
+        }
+      }
+    },
+  },
 });

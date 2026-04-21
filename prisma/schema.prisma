@@ -1,10 +1,6 @@
-// Prisma schema — v10 (multi-Lieu / multi-Place)
-// Changes from v9:
-//   + Place     : a user-owned container (garage, cave, rented storage unit, ...)
-//   + PlaceShare: will power sharing in iteration 2 (role = viewer/editor/admin)
-//   - Location  : now tied to a Place (placeId) instead of directly to a User
-//   - Box       : now tied to a Place (placeId). userId kept for backwards-compat
-//                 queries (e.g. "boxes created by me") but not used for scoping.
+// Prisma schema — v12 (quality of life)
+// New in v12:
+//   + UndoEntry : reversible action log, scoped per user+place
 generator client {
   provider = "prisma-client-js"
 }
@@ -22,13 +18,15 @@ model User {
   emailVerified DateTime?
   image         String?
   passwordHash  String?
-  accounts      Account[]
-  sessions      Session[]
-  ownedPlaces   Place[]       @relation("PlaceOwner")
-  shares        PlaceShare[]
-  locations     Location[]    // created-by, kept for compat
-  boxes         Box[]         // created-by, kept for compat
-  createdAt     DateTime  @default(now())
+  accounts        Account[]
+  sessions        Session[]
+  ownedPlaces     Place[]           @relation("PlaceOwner")
+  shares          PlaceShare[]
+  createdInvites  PlaceInvitation[] @relation("InviteCreator")
+  locations       Location[]
+  boxes           Box[]
+  undoEntries     UndoEntry[]
+  createdAt       DateTime  @default(now())
 }
 
 model Account {
@@ -63,7 +61,7 @@ model VerificationToken {
   @@unique([identifier, token])
 }
 
-// ─── Place: the container ("Mon Garage", "Cave Papa", ...) ────────
+// ─── Place / share / invite ────────────────────────────────────────
 model Place {
   id          String   @id @default(cuid())
   name        String
@@ -71,32 +69,65 @@ model Place {
   ownerId     String
   owner       User     @relation("PlaceOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   shares      PlaceShare[]
+  invitations PlaceInvitation[]
   locations   Location[]
   boxes       Box[]
+  undoEntries UndoEntry[]
   createdAt   DateTime @default(now())
-
   @@index([ownerId])
 }
 
-// Reserved for iteration 2 — sharing model
 model PlaceShare {
   id        String   @id @default(cuid())
   placeId   String
   userId    String
-  role      String   @default("viewer") // "viewer" | "editor" | "admin"
+  role      String   @default("viewer")
   createdAt DateTime @default(now())
   place     Place    @relation(fields: [placeId], references: [id], onDelete: Cascade)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
   @@unique([placeId, userId])
   @@index([userId])
 }
 
-// ─── Domain models ─────────────────────────────────────────────────
+model PlaceInvitation {
+  id         String    @id @default(cuid())
+  placeId    String
+  place      Place     @relation(fields: [placeId], references: [id], onDelete: Cascade)
+  createdById String
+  createdBy  User      @relation("InviteCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  kind       String
+  role       String    @default("viewer")
+  email      String?
+  token      String?   @unique
+  maxUses    Int?
+  usedCount  Int       @default(0)
+  expiresAt  DateTime?
+  createdAt  DateTime  @default(now())
+  @@index([placeId])
+  @@index([email])
+}
+
+// Reversible action log. Kept short (last 20 per user per place).
+// `payload` stores the INVERSE operation to perform on undo, as JSON.
+// For example, moving a box from A→B records { boxId, toLocationId: A, toStackIndex: 0 }.
+model UndoEntry {
+  id        String   @id @default(cuid())
+  userId    String
+  placeId   String
+  kind      String   // "move_box" | "reorder_box" | "edit_box" | "create_box" | "delete_box"
+  payload   Json     // inverse action payload
+  label     String   // human-readable description for UI
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  place     Place    @relation(fields: [placeId], references: [id], onDelete: Cascade)
+  @@index([userId, placeId, createdAt])
+}
+
+// ─── Domain ────────────────────────────────────────────────────────
 model Location {
   id        String   @id @default(cuid())
   placeId   String
-  userId    String   // creator, for audit/compat (not for scoping)
+  userId    String
   code      String
   aisle     String
   slot      Int
@@ -109,7 +140,6 @@ model Location {
   place     Place    @relation(fields: [placeId], references: [id], onDelete: Cascade)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   boxes     Box[]
-
   @@unique([placeId, code])
   @@index([placeId, row, col])
 }
@@ -117,7 +147,7 @@ model Location {
 model Box {
   id          String    @id @default(cuid())
   placeId     String
-  userId      String    // creator
+  userId      String
   name        String
   description String?
   tags        String    @default("")
@@ -131,7 +161,6 @@ model Box {
   moves       Move[]
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
-
   @@index([placeId])
   @@index([locationId, stackIndex])
 }
@@ -146,6 +175,5 @@ model Move {
   toStackIndex   Int?
   reason         String   @default("move")
   createdAt      DateTime @default(now())
-
   @@index([boxId, createdAt])
 }

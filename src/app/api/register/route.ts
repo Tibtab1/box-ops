@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { hash } from "bcryptjs";
 import { prisma } from "@/lib/prisma";
+import { claimPendingInvitations } from "@/lib/claim-invitations";
 
-// POST /api/register — create a new user with email + password
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   const email =
@@ -37,6 +37,13 @@ export async function POST(req: NextRequest) {
     },
     select: { id: true, email: true, name: true },
   });
+
+  // Claim any email-based invitations waiting for this address
+  try {
+    await claimPendingInvitations(user.id, user.email);
+  } catch (e) {
+    console.error("claim after register failed:", e);
+  }
 
   return NextResponse.json(user, { status: 201 });
 }

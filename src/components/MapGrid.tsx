@@ -17,6 +17,10 @@ type Props = {
     row: number,
     action: "add_left" | "add_right" | "remove_left" | "remove_right"
   ) => Promise<void>;
+  /** Called when a box is drag-dropped from one cell to another (editor+). */
+  onBoxDrop?: (boxId: string, targetCode: string) => Promise<void>;
+  /** When true, boxes on top of stacks can be dragged. */
+  dragEnabled?: boolean;
 };
 
 export default function MapGrid({
@@ -28,6 +32,8 @@ export default function MapGrid({
   placementMode,
   editMode,
   onRowMutate,
+  onBoxDrop,
+  dragEnabled,
 }: Props) {
   // Group cells by row. Each row knows its min/max column for alignment.
   const { rowsData, globalMinCol, globalMaxCol } = useMemo(() => {
@@ -57,6 +63,13 @@ export default function MapGrid({
   }, [cells]);
 
   const [busyRow, setBusyRow] = useState<number | null>(null);
+  // ── Drag & drop state ──────────────────────────────────────────────
+  // draggedBox: the box currently being dragged (null when idle)
+  // dragOverCode: cell code under pointer, for visual highlight
+  const [draggedBox, setDraggedBox] = useState<
+    { id: string; fromCode: string } | null
+  >(null);
+  const [dragOverCode, setDragOverCode] = useState<string | null>(null);
 
   async function mutate(
     row: number,
@@ -187,6 +200,12 @@ export default function MapGrid({
                     selectedCode={selectedCode}
                     highlightedCodes={highlightedCodes}
                     measureEndpoints={measureEndpoints}
+                    dragEnabled={dragEnabled}
+                    draggedBox={draggedBox}
+                    setDraggedBox={setDraggedBox}
+                    dragOverCode={dragOverCode}
+                    setDragOverCode={setDragOverCode}
+                    onBoxDrop={onBoxDrop}
                   />
                 );
               })}
@@ -211,6 +230,12 @@ function CellButton({
   selectedCode,
   highlightedCodes,
   measureEndpoints,
+  dragEnabled,
+  draggedBox,
+  setDraggedBox,
+  dragOverCode,
+  setDragOverCode,
+  onBoxDrop,
 }: {
   cell: CellView;
   isFirst: boolean;
@@ -224,6 +249,12 @@ function CellButton({
   selectedCode?: string | null;
   highlightedCodes?: Set<string>;
   measureEndpoints?: { a?: string | null; b?: string | null };
+  dragEnabled?: boolean;
+  draggedBox: { id: string; fromCode: string } | null;
+  setDraggedBox: (v: { id: string; fromCode: string } | null) => void;
+  dragOverCode: string | null;
+  setDragOverCode: (v: string | null) => void;
+  onBoxDrop?: (boxId: string, targetCode: string) => Promise<void>;
 }) {
   const topBox = cell.boxes[cell.boxes.length - 1];
   const stackSize = cell.boxes.length;
@@ -280,11 +311,55 @@ function CellButton({
     );
   } else {
     const occupied = stackSize > 0;
+    const isDropTarget =
+      dragEnabled && draggedBox !== null && draggedBox.fromCode !== cell.code;
+    const isDragOverHere = isDropTarget && dragOverCode === cell.code;
+    // Only the top box can be dragged (and only in editor mode via dragEnabled)
+    const canDragTop = dragEnabled && occupied;
+
     content = (
       <button
         type="button"
-        disabled={!clickable}
+        disabled={!clickable && !isDropTarget}
         onClick={() => onCellClick?.(cell)}
+        draggable={canDragTop}
+        onDragStart={(e) => {
+          if (!canDragTop) return;
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/boxops-box-id", topBox.id);
+          setDraggedBox({ id: topBox.id, fromCode: cell.code });
+        }}
+        onDragEnd={() => {
+          setDraggedBox(null);
+          setDragOverCode(null);
+        }}
+        onDragOver={(e) => {
+          if (!isDropTarget) return;
+          // Only accept if target cell has capacity
+          if (stackSize >= cell.capacity) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          if (dragOverCode !== cell.code) setDragOverCode(cell.code);
+        }}
+        onDragLeave={(e) => {
+          // avoid flicker when moving between children
+          if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+          if (dragOverCode === cell.code) setDragOverCode(null);
+        }}
+        onDrop={async (e) => {
+          if (!isDropTarget || !onBoxDrop) return;
+          e.preventDefault();
+          const boxId = e.dataTransfer.getData("text/boxops-box-id");
+          setDraggedBox(null);
+          setDragOverCode(null);
+          if (boxId) {
+            try {
+              await onBoxDrop(boxId, cell.code);
+            } catch {
+              // errors bubble through parent toast/state
+            }
+          }
+        }}
         className={clsx(
           "relative w-full h-full border-2 transition-all text-left",
           occupied
@@ -297,7 +372,11 @@ function CellButton({
           placementMode && !occupied &&
             "bg-blueprint-pale/60 hover:bg-blueprint-light/50",
           editMode && "ring-2 ring-blueprint/30",
-          !clickable && "cursor-default"
+          // Drag-related visuals
+          canDragTop && "cursor-grab active:cursor-grabbing",
+          draggedBox?.fromCode === cell.code && "opacity-50",
+          isDragOverHere && "ring-4 ring-blueprint scale-[1.03] z-10",
+          !clickable && !isDropTarget && "cursor-default"
         )}
         style={occupied ? { backgroundColor: topBox.color } : undefined}
         aria-label={

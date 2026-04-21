@@ -15,6 +15,9 @@ import StackPicker from "@/components/StackPicker";
 import ThemeToggle from "@/components/ThemeToggle";
 import UserMenu from "@/components/UserMenu";
 import PlaceSwitcher from "@/components/PlaceSwitcher";
+import NotificationBell from "@/components/NotificationBell";
+import UndoButton from "@/components/UndoButton";
+import Toasts, { useToasts } from "@/components/Toasts";
 import ViewToggle, {
   readStoredViewMode,
   type ViewMode,
@@ -57,6 +60,19 @@ export default function HomePage() {
   const [mutateError, setMutateError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
+  // v12 additions
+  const [activeRole, setActiveRole] = useState<
+    "owner" | "admin" | "editor" | "viewer" | null
+  >(null);
+  const [undoRefreshKey, setUndoRefreshKey] = useState(0);
+  const { toasts, push: pushToast, dismiss: dismissToast } = useToasts();
+
+  // Auto-bump the undo-check key whenever data changes, so the button
+  // stays in sync with the server without manual bumps everywhere.
+  useEffect(() => {
+    setUndoRefreshKey((k) => k + 1);
+  }, [cells, boxes]);
+
   useEffect(() => {
     setViewMode(readStoredViewMode());
   }, []);
@@ -80,9 +96,11 @@ export default function HomePage() {
   const isReadOnly3D = tab === "map" && viewMode === "3d";
 
   const refresh = useCallback(async () => {
-    const [locRes, boxRes] = await Promise.all([
+    const [locRes, boxRes, placesRes, activeRes] = await Promise.all([
       fetch("/api/locations").then((r) => r.json()),
       fetch("/api/boxes").then((r) => r.json()),
+      fetch("/api/places").then((r) => (r.ok ? r.json() : [])),
+      fetch("/api/places/active").then((r) => (r.ok ? r.json() : null)),
     ]);
     setCells(locRes);
     setBoxes(
@@ -104,6 +122,17 @@ export default function HomePage() {
         })
       )
     );
+    // Resolve role on active place
+    if (Array.isArray(placesRes) && activeRes?.placeId) {
+      const active = placesRes.find(
+        (p: { id: string }) => p.id === activeRes.placeId
+      );
+      if (active) {
+        setActiveRole(active.role);
+      }
+    } else if (Array.isArray(placesRes) && placesRes.length > 0) {
+      setActiveRole(placesRes[0].role);
+    }
     setLoading(false);
   }, []);
 
@@ -213,6 +242,30 @@ export default function HomePage() {
     [refresh]
   );
 
+  // Drag & drop: move the top box of one cell to another cell
+  const handleBoxDrop = useCallback(
+    async (boxId: string, targetCode: string) => {
+      const res = await fetch(`/api/boxes/${boxId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locationCode: targetCode }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        pushToast("error", data.error ?? "Déplacement impossible.");
+        return;
+      }
+      pushToast("success", `Déplacée vers ${targetCode}`);
+      await refresh();
+    },
+    [refresh, pushToast]
+  );
+
+  const handleUndone = useCallback(async () => {
+    pushToast("info", "Action annulée");
+    await refresh();
+  }, [refresh, pushToast]);
+
   function handleSearchSelect(boxId: string, code: string | null) {
     setRightPanel({ kind: "detail", boxId });
     setFocusedCode(code);
@@ -269,6 +322,16 @@ export default function HomePage() {
             />
             <StatPill label="Taux" value={`${stats.pct}%`} tone="ink" />
             <ExportMenu open={menuOpen} setOpen={setMenuOpen} />
+            <UndoButton
+              refreshKey={undoRefreshKey}
+              onUndone={handleUndone}
+              disabled={
+                isReadOnly3D ||
+                activeRole === "viewer" ||
+                activeRole === null
+              }
+            />
+            <NotificationBell />
             <ThemeToggle />
             <UserMenu />
           </div>
@@ -369,6 +432,14 @@ export default function HomePage() {
                     placementMode={placementMode}
                     editMode={editMode}
                     onRowMutate={editMode ? handleRowMutate : undefined}
+                    onBoxDrop={handleBoxDrop}
+                    dragEnabled={
+                      !editMode &&
+                      !placementMode &&
+                      (activeRole === "owner" ||
+                        activeRole === "admin" ||
+                        activeRole === "editor")
+                    }
                   />
                 ) : (
                   <MapGrid3D
@@ -440,6 +511,8 @@ export default function HomePage() {
           </span>
         </div>
       </footer>
+
+      <Toasts toasts={toasts} onDismiss={dismissToast} />
     </main>
   );
 }

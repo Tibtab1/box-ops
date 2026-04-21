@@ -3,276 +3,292 @@
 import { useMemo, useState } from "react";
 import clsx from "clsx";
 
-type InventoryBox = {
+type BoxRow = {
   id: string;
   name: string;
-  tags: string[];
   color: string;
-  location: { code: string } | null;
+  tags: string[];
+  location: { code: string; row: number; col: number } | null;
   updatedAt: string;
 };
 
-type SortKey = "name" | "location" | "updatedAt";
-type SortDir = "asc" | "desc";
+type SortMode = "recent" | "alpha" | "location";
+type PlacementFilter = "all" | "placed" | "unplaced";
 
 type Props = {
-  boxes: InventoryBox[];
+  boxes: BoxRow[];
   onOpenBox: (id: string) => void;
 };
 
 export default function InventoryList({ boxes, onOpenBox }: Props) {
-  const [filter, setFilter] = useState("");
-  const [tagFilter, setTagFilter] = useState<string | null>(null);
-  const [placedOnly, setPlacedOnly] = useState<"all" | "placed" | "unplaced">(
-    "all"
-  );
-  const [sortKey, setSortKey] = useState<SortKey>("name");
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [query, setQuery] = useState("");
+  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
+  const [selectedColor, setSelectedColor] = useState<string | null>(null);
+  const [placement, setPlacement] = useState<PlacementFilter>("all");
+  const [sort, setSort] = useState<SortMode>("recent");
+  const [showFilters, setShowFilters] = useState(false);
 
+  // Collect all tags and colors actually present in the data
   const allTags = useMemo(() => {
     const set = new Set<string>();
-    boxes.forEach((b) => b.tags.forEach((t) => set.add(t)));
+    for (const b of boxes) for (const t of b.tags) set.add(t);
     return [...set].sort();
   }, [boxes]);
 
-  const filteredSorted = useMemo(() => {
-    const needle = filter.trim().toLowerCase();
-    let list = boxes.filter((b) => {
-      if (placedOnly === "placed" && !b.location) return false;
-      if (placedOnly === "unplaced" && b.location) return false;
-      if (tagFilter && !b.tags.includes(tagFilter)) return false;
+  const allColors = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const b of boxes) {
+      counts.set(b.color, (counts.get(b.color) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([color, count]) => ({ color, count }));
+  }, [boxes]);
+
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    let rows = boxes.filter((b) => {
+      if (placement === "placed" && !b.location) return false;
+      if (placement === "unplaced" && b.location) return false;
+      if (selectedColor && b.color !== selectedColor) return false;
+      if (selectedTags.size > 0) {
+        for (const t of selectedTags) if (!b.tags.includes(t)) return false;
+      }
       if (needle) {
-        const hay = [b.name, ...b.tags, b.location?.code ?? ""]
+        const hay = [
+          b.name,
+          b.tags.join(" "),
+          b.location?.code ?? "",
+        ]
           .join(" ")
           .toLowerCase();
         if (!hay.includes(needle)) return false;
       }
       return true;
     });
-
-    list = list.slice().sort((a, b) => {
-      let cmp = 0;
-      if (sortKey === "name") cmp = a.name.localeCompare(b.name);
-      else if (sortKey === "location") {
-        const ac = a.location?.code ?? "~~~";
-        const bc = b.location?.code ?? "~~~";
-        cmp = ac.localeCompare(bc);
-      } else cmp = a.updatedAt.localeCompare(b.updatedAt);
-      return sortDir === "asc" ? cmp : -cmp;
-    });
-    return list;
-  }, [boxes, filter, tagFilter, placedOnly, sortKey, sortDir]);
-
-  function toggleSort(key: SortKey) {
-    if (sortKey === key) setSortDir(sortDir === "asc" ? "desc" : "asc");
-    else {
-      setSortKey(key);
-      setSortDir("asc");
+    if (sort === "alpha") {
+      rows = [...rows].sort((a, b) => a.name.localeCompare(b.name, "fr"));
+    } else if (sort === "location") {
+      rows = [...rows].sort((a, b) => {
+        if (!a.location && !b.location) return 0;
+        if (!a.location) return 1;
+        if (!b.location) return -1;
+        return a.location.code.localeCompare(b.location.code);
+      });
+    } else {
+      rows = [...rows].sort((a, b) =>
+        b.updatedAt.localeCompare(a.updatedAt)
+      );
     }
+    return rows;
+  }, [boxes, query, placement, selectedColor, selectedTags, sort]);
+
+  const activeFilterCount =
+    (selectedTags.size > 0 ? 1 : 0) +
+    (selectedColor ? 1 : 0) +
+    (placement !== "all" ? 1 : 0);
+
+  function toggleTag(tag: string) {
+    const next = new Set(selectedTags);
+    if (next.has(tag)) next.delete(tag);
+    else next.add(tag);
+    setSelectedTags(next);
+  }
+
+  function clearFilters() {
+    setQuery("");
+    setSelectedTags(new Set());
+    setSelectedColor(null);
+    setPlacement("all");
   }
 
   return (
-    <div className="panel">
-      {/* Toolbar */}
-      <div className="p-4 border-b-2 border-ink/15 space-y-3">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-ink/60">
-              Registre complet
-            </div>
-            <h2 className="font-display text-2xl font-black text-ink leading-none">
-              Inventaire
-            </h2>
+    <div className="panel p-5 space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-ink/60">
+            Inventaire
           </div>
-          <span className="stamp-badge bg-ink text-paper border-ink">
-            {filteredSorted.length} / {boxes.length}
-          </span>
-        </div>
-
-        <input
-          className="input-field"
-          placeholder="Filtrer par nom, tag, emplacement…"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-        />
-
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink/60 mr-1">
-            Statut :
-          </span>
-          {(["all", "placed", "unplaced"] as const).map((s) => (
-            <button
-              key={s}
-              onClick={() => setPlacedOnly(s)}
-              className={clsx(
-                "font-mono text-[10px] uppercase tracking-widest px-2.5 py-1 border-2 transition-all",
-                placedOnly === s
-                  ? "bg-ink text-paper border-ink shadow-stamp"
-                  : "border-ink/30 text-ink/70 hover:border-ink"
-              )}
-            >
-              {s === "all" ? "Toutes" : s === "placed" ? "Placées" : "Sans emplacement"}
-            </button>
-          ))}
-        </div>
-
-        {allTags.length > 0 && (
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink/60 mr-1">
-              Tag :
+          <h2 className="font-display text-2xl font-black text-ink leading-tight">
+            {filtered.length}{" "}
+            <span className="text-ink/50 font-normal text-lg">
+              / {boxes.length} boîtes
             </span>
-            <button
-              onClick={() => setTagFilter(null)}
-              className={clsx(
-                "font-mono text-[10px] uppercase tracking-widest px-2.5 py-1 border-2",
-                !tagFilter
-                  ? "bg-ink text-paper border-ink shadow-stamp"
-                  : "border-ink/30 text-ink/70 hover:border-ink"
-              )}
-            >
-              Tous
-            </button>
-            {allTags.map((t) => (
-              <button
-                key={t}
-                onClick={() => setTagFilter(t === tagFilter ? null : t)}
-                className={clsx(
-                  "font-mono text-[10px] uppercase tracking-widest px-2.5 py-1 border-2",
-                  tagFilter === t
-                    ? "bg-safety text-paper border-ink shadow-stamp"
-                    : "border-ink/30 text-ink/70 hover:border-ink"
-                )}
-              >
-                #{t}
-              </button>
-            ))}
-          </div>
-        )}
+          </h2>
+        </div>
+        <div className="flex items-center gap-2">
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as SortMode)}
+            className="font-mono text-[10px] uppercase tracking-widest border-2 border-ink bg-paper px-2 py-1.5"
+          >
+            <option value="recent">Récent</option>
+            <option value="alpha">A-Z</option>
+            <option value="location">Emplacement</option>
+          </select>
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={clsx(
+              "font-mono text-[10px] uppercase tracking-widest px-2.5 py-1.5 border-2 border-ink transition-colors",
+              showFilters || activeFilterCount > 0
+                ? "bg-ink text-paper"
+                : "bg-paper text-ink"
+            )}
+          >
+            ⚙ Filtres
+            {activeFilterCount > 0 && ` (${activeFilterCount})`}
+          </button>
+        </div>
       </div>
 
-      {/* Table */}
-      <div className="overflow-x-auto">
-        <table className="w-full text-left">
-          <thead>
-            <tr className="bg-paper-dark/40 border-b-2 border-ink/15">
-              <Th
-                onClick={() => toggleSort("name")}
-                active={sortKey === "name"}
-                dir={sortDir}
-              >
-                Nom
-              </Th>
-              <Th
-                onClick={() => toggleSort("location")}
-                active={sortKey === "location"}
-                dir={sortDir}
-              >
-                Emplacement
-              </Th>
-              <th className="px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-ink/70">
+      {/* Search box */}
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Rechercher une boîte, un tag, un emplacement…"
+        className="input-field"
+      />
+
+      {/* Filter panel */}
+      {showFilters && (
+        <div className="space-y-3 p-3 bg-paper-dark/40 border-2 border-dashed border-ink/30">
+          {/* Placement */}
+          <div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink/70 mb-1.5">
+              Emplacement
+            </div>
+            <div className="flex gap-1.5 flex-wrap">
+              {(
+                [
+                  ["all", "Toutes"],
+                  ["placed", "Placées"],
+                  ["unplaced", "Sans emplacement"],
+                ] as const
+              ).map(([k, label]) => (
+                <button
+                  key={k}
+                  onClick={() => setPlacement(k)}
+                  className={clsx(
+                    "font-mono text-[10px] uppercase tracking-widest px-2 py-1 border-2 transition-all",
+                    placement === k
+                      ? "bg-ink text-paper border-ink"
+                      : "border-ink/30 text-ink/70 hover:border-ink"
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Tags */}
+          {allTags.length > 0 && (
+            <div>
+              <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink/70 mb-1.5">
                 Tags
-              </th>
-              <Th
-                onClick={() => toggleSort("updatedAt")}
-                active={sortKey === "updatedAt"}
-                dir={sortDir}
-              >
-                Maj
-              </Th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredSorted.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={4}
-                  className="p-6 text-center font-mono text-xs uppercase tracking-widest text-ink/50"
-                >
-                  Aucune boîte ne correspond aux filtres.
-                </td>
-              </tr>
-            ) : (
-              filteredSorted.map((b) => (
-                <tr
-                  key={b.id}
-                  onClick={() => onOpenBox(b.id)}
-                  className="border-b border-dashed border-ink/15 hover:bg-paper-dark/30 cursor-pointer transition-colors"
-                >
-                  <td className="px-3 py-2.5">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span
-                        className="w-3 h-3 border-2 border-ink shrink-0"
-                        style={{ backgroundColor: b.color }}
-                      />
-                      <span className="font-display font-bold text-ink truncate">
-                        {b.name}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    {b.location ? (
-                      <span className="stamp-badge bg-blueprint text-paper border-ink">
-                        {b.location.code}
-                      </span>
-                    ) : (
-                      <span className="font-mono text-xs text-ink/40">
-                        ∅
+              </div>
+              <div className="flex gap-1.5 flex-wrap">
+                {allTags.map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => toggleTag(t)}
+                    className={clsx(
+                      "font-mono text-[10px] uppercase tracking-widest px-2 py-1 border-2 transition-all",
+                      selectedTags.has(t)
+                        ? "bg-safety text-paper border-ink"
+                        : "border-ink/30 text-ink/70 hover:border-ink"
+                    )}
+                  >
+                    #{t}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Colors */}
+          {allColors.length > 1 && (
+            <div>
+              <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink/70 mb-1.5">
+                Couleur
+              </div>
+              <div className="flex gap-1 flex-wrap">
+                {allColors.map(({ color, count }) => (
+                  <button
+                    key={color}
+                    onClick={() =>
+                      setSelectedColor(selectedColor === color ? null : color)
+                    }
+                    className={clsx(
+                      "w-7 h-7 border-2 transition-transform relative group",
+                      selectedColor === color
+                        ? "border-ink scale-110"
+                        : "border-ink/30 hover:border-ink hover:scale-110"
+                    )}
+                    style={{ backgroundColor: color }}
+                    title={`${color} · ${count} boîte(s)`}
+                  >
+                    {selectedColor === color && (
+                      <span className="absolute inset-0 grid place-items-center text-paper font-bold text-xs drop-shadow">
+                        ✓
                       </span>
                     )}
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <div className="flex flex-wrap gap-1">
-                      {b.tags.slice(0, 3).map((t) => (
-                        <span key={t} className="label-tag !text-[9px]">
-                          #{t}
-                        </span>
-                      ))}
-                      {b.tags.length > 3 && (
-                        <span className="font-mono text-[10px] text-ink/50">
-                          +{b.tags.length - 3}
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5 font-mono text-[11px] text-ink/60 whitespace-nowrap">
-                    {new Date(b.updatedAt).toLocaleDateString("fr-FR", {
-                      day: "2-digit",
-                      month: "short",
-                    })}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
-function Th({
-  children,
-  onClick,
-  active,
-  dir,
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-  active: boolean;
-  dir: "asc" | "desc";
-}) {
-  return (
-    <th
-      onClick={onClick}
-      className={clsx(
-        "px-3 py-2 font-mono text-[10px] uppercase tracking-widest cursor-pointer select-none transition-colors",
-        active ? "text-ink" : "text-ink/70 hover:text-ink"
+          {activeFilterCount > 0 && (
+            <button
+              onClick={clearFilters}
+              className="font-mono text-[10px] uppercase tracking-widest text-ink/60 hover:text-safety"
+            >
+              ✕ Effacer tous les filtres
+            </button>
+          )}
+        </div>
       )}
-    >
-      <span className="inline-flex items-center gap-1">
-        {children}
-        {active && <span className="text-safety">{dir === "asc" ? "▲" : "▼"}</span>}
-      </span>
-    </th>
+
+      {/* Results */}
+      {filtered.length === 0 ? (
+        <div className="font-mono text-xs uppercase tracking-widest text-ink/40 text-center py-8">
+          {boxes.length === 0
+            ? "Aucune boîte pour l'instant."
+            : "Aucun résultat — essayez d'autres filtres."}
+        </div>
+      ) : (
+        <ul className="space-y-1.5 max-h-[520px] overflow-y-auto pr-1">
+          {filtered.map((b) => (
+            <li key={b.id}>
+              <button
+                type="button"
+                onClick={() => onOpenBox(b.id)}
+                className="w-full flex items-center gap-2.5 p-2 border-2 border-ink shadow-stamp text-left transition-all hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-stamp-lg"
+                style={{ backgroundColor: b.color }}
+              >
+                <span
+                  className="font-mono text-[9px] uppercase tracking-widest bg-paper/95 text-ink px-1.5 py-0.5 border border-ink shrink-0"
+                  title={b.location?.code ?? "Sans emplacement"}
+                >
+                  {b.location?.code ?? "·"}
+                </span>
+                <span className="font-display font-bold text-paper flex-1 truncate">
+                  {b.name}
+                </span>
+                {b.tags.length > 0 && (
+                  <span className="font-mono text-[9px] text-paper/80 truncate shrink-0 max-w-[40%]">
+                    {b.tags.slice(0, 3).map((t) => `#${t}`).join(" ")}
+                    {b.tags.length > 3 && ` +${b.tags.length - 3}`}
+                  </span>
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

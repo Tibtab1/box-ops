@@ -118,15 +118,25 @@ export default function HomePage() {
         throw new Error("Network error");
       }
 
-      const newCells = (locRes as CellView[]) ?? [];
-      const mappedBoxes = ((boxRes as Array<{
-        id: string;
-        name: string;
-        color: string;
-        tags: string[];
-        location: { code: string; row: number; col: number } | null;
-        updatedAt: string;
-      }>) ?? []).map((b) => ({
+      // Defensively check: API routes can return error objects when things
+      // go wrong (e.g. no active place, foreign key error). If we don't
+      // guard against that, `.map` below throws.
+      const safeCells: CellView[] = Array.isArray(locRes)
+        ? (locRes as CellView[])
+        : [];
+      const safeBoxes = Array.isArray(boxRes)
+        ? (boxRes as Array<{
+            id: string;
+            name: string;
+            color: string;
+            tags: string[];
+            location: { code: string; row: number; col: number } | null;
+            updatedAt: string;
+          }>)
+        : [];
+
+      const newCells = safeCells;
+      const mappedBoxes = safeBoxes.map((b) => ({
         id: b.id,
         name: b.name,
         color: b.color,

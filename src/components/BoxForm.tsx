@@ -19,6 +19,10 @@ type Props = {
   mode: Mode;
   locations: LocationLite[];
   presetLocationCode?: string | null;
+  /** When creating a child inside a furniture, provide the parent's ID */
+  parentFurnitureId?: string | null;
+  /** When creating as a furniture item, skip the toggle and start in furniture mode */
+  presetKind?: "box" | "furniture";
   onSaved: (boxId: string) => void;
   onCancel: () => void;
 };
@@ -27,6 +31,8 @@ export default function BoxForm({
   mode,
   locations,
   presetLocationCode,
+  parentFurnitureId,
+  presetKind,
   onSaved,
   onCancel,
 }: Props) {
@@ -43,6 +49,15 @@ export default function BoxForm({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [hydrated, setHydrated] = useState(mode.kind === "create");
+
+  // ── v13: furniture support ──
+  const [kind, setKind] = useState<"box" | "furniture">(
+    presetKind ?? "box"
+  );
+  const [spanW, setSpanW] = useState<number>(1);
+  const [spanH, setSpanH] = useState<number>(1);
+  // Track if we're inside a furniture (child creation). Cannot be a furniture then.
+  const insideFurniture = !!parentFurnitureId;
 
   // The actual color used for the preview and submission
   const activeColor = useMemo(
@@ -71,6 +86,10 @@ export default function BoxForm({
           setManualColor(b.color);
         }
         setLocationCode(b.location?.code ?? "");
+        // v13: load kind/span
+        setKind(b.kind ?? "box");
+        setSpanW(b.spanW ?? 1);
+        setSpanH(b.spanH ?? 1);
         setHydrated(true);
       });
   }, [mode]);
@@ -130,8 +149,27 @@ export default function BoxForm({
       tags,
       photoUrl,
       color: activeColor,
-      locationCode: locationCode || null,
     };
+
+    // Branch on scenario: child inside furniture / furniture on plan / normal box
+    if (mode.kind === "create" && insideFurniture) {
+      payload.parentId = parentFurnitureId;
+      // kind stays "box" for children, no location needed
+    } else if (kind === "furniture") {
+      payload.kind = "furniture";
+      payload.spanW = spanW;
+      payload.spanH = 1; // UI only supports horizontal furniture for now
+      payload.locationCode = locationCode || null;
+    } else {
+      payload.kind = "box";
+      payload.locationCode = locationCode || null;
+    }
+
+    // For edit mode on furniture, allow resizing width only
+    if (mode.kind === "edit" && kind === "furniture") {
+      payload.spanW = spanW;
+      payload.spanH = 1;
+    }
 
     try {
       const url =
@@ -177,7 +215,15 @@ export default function BoxForm({
             Formulaire
           </div>
           <h2 className="font-display text-2xl font-black text-ink leading-tight">
-            {mode.kind === "create" ? "Nouvelle boîte" : "Éditer la boîte"}
+            {mode.kind === "create"
+              ? insideFurniture
+                ? "Nouvelle boîte (dans le meuble)"
+                : kind === "furniture"
+                ? "Nouveau meuble"
+                : "Nouvelle boîte"
+              : kind === "furniture"
+              ? "Éditer le meuble"
+              : "Éditer la boîte"}
           </h2>
         </div>
         <button
@@ -189,6 +235,62 @@ export default function BoxForm({
           ✕
         </button>
       </div>
+
+      {/* Kind toggle (creation mode only, not for children-inside-furniture) */}
+      {mode.kind === "create" && !insideFurniture && !presetKind && (
+        <div className="grid grid-cols-2 gap-1.5 p-1 bg-paper-dark/30 border-2 border-ink">
+          <button
+            type="button"
+            onClick={() => setKind("box")}
+            className={clsx(
+              "font-mono text-[10px] uppercase tracking-widest py-2 transition-all",
+              kind === "box"
+                ? "bg-ink text-paper"
+                : "text-ink/60 hover:text-ink"
+            )}
+          >
+            📦 Boîte
+          </button>
+          <button
+            type="button"
+            onClick={() => setKind("furniture")}
+            className={clsx(
+              "font-mono text-[10px] uppercase tracking-widest py-2 transition-all",
+              kind === "furniture"
+                ? "bg-ink text-paper"
+                : "text-ink/60 hover:text-ink"
+            )}
+          >
+            🪑 Meuble
+          </button>
+        </div>
+      )}
+
+      {/* Furniture dimensions picker */}
+      {kind === "furniture" && !insideFurniture && (
+        <Field label="Largeur (nombre de cellules)">
+          <div className="grid grid-cols-3 gap-2">
+            {[1, 2, 3].map((w) => (
+              <button
+                key={`w${w}`}
+                type="button"
+                onClick={() => setSpanW(w)}
+                className={clsx(
+                  "font-mono text-xs uppercase tracking-widest py-2 border-2 transition-all",
+                  spanW === w
+                    ? "bg-ink text-paper border-ink"
+                    : "border-ink/30 text-ink/70 hover:border-ink"
+                )}
+              >
+                {w} cellule{w > 1 ? "s" : ""}
+              </button>
+            ))}
+          </div>
+          <p className="font-mono text-[9px] uppercase tracking-widest text-ink/50 mt-1.5">
+            Le meuble occupera {spanW} cellule{spanW > 1 ? "s" : ""} côte à côte sur la même rangée.
+          </p>
+        </Field>
+      )}
 
       <Field label="Nom" required>
         <div className="relative">
@@ -312,27 +414,47 @@ export default function BoxForm({
         </div>
       </Field>
 
-      <Field label="Emplacement">
-        <select
-          className="input-field"
-          value={locationCode}
-          onChange={(e) => setLocationCode(e.target.value)}
+      {!insideFurniture && (
+        <Field
+          label={
+            kind === "furniture"
+              ? `Cellule de départ (×${spanW})`
+              : "Emplacement"
+          }
+          required={kind === "furniture"}
         >
-          <option value="">— Non assigné —</option>
-          {availableLocations.map((l) => {
-            const isCurrent = l.code === locationCode;
-            return (
-              <option key={l.code} value={l.code}>
-                {l.code} · {l.boxesCount}/{l.capacity}
-                {isCurrent && mode.kind === "edit" ? " (actuel)" : ""}
-              </option>
-            );
-          })}
-        </select>
-        <p className="font-mono text-[10px] text-ink/50 mt-1">
-          La boîte sera placée au-dessus de la pile.
-        </p>
-      </Field>
+          <select
+            className="input-field"
+            value={locationCode}
+            onChange={(e) => setLocationCode(e.target.value)}
+            required={kind === "furniture"}
+          >
+            <option value="">
+              — {kind === "furniture" ? "Choisir une cellule" : "Non assigné"} —
+            </option>
+            {availableLocations.map((l) => {
+              const isCurrent = l.code === locationCode;
+              return (
+                <option key={l.code} value={l.code}>
+                  {l.code} · {l.boxesCount}/{l.capacity}
+                  {isCurrent && mode.kind === "edit" ? " (actuel)" : ""}
+                </option>
+              );
+            })}
+          </select>
+          <p className="font-mono text-[10px] text-ink/50 mt-1">
+            {kind === "furniture"
+              ? `Le meuble couvrira cette cellule${spanW > 1 ? ` et ${spanW - 1} cellule(s) à sa droite.` : "."}`
+              : "La boîte sera placée au-dessus de la pile."}
+          </p>
+        </Field>
+      )}
+
+      {insideFurniture && (
+        <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink/60 bg-paper-dark/30 border-2 border-dashed border-ink/30 px-3 py-2">
+          📥 Cette boîte sera rangée dans le meuble parent.
+        </div>
+      )}
 
       {error && (
         <div className="font-mono text-xs uppercase tracking-widest text-safety bg-safety/10 border-2 border-safety px-3 py-2">

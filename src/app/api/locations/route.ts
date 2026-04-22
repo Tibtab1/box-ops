@@ -5,6 +5,12 @@ import { requirePlaceAccess } from "@/lib/require-place";
 
 export const dynamic = "force-dynamic";
 
+// GET /api/locations
+//
+// v13: each Box now carries `kind` (box | furniture), `spanW`, `spanH`, and
+// `parentId`. We expose them so the client can render furniture items that
+// span multiple cells. Boxes stored *inside* furniture (parentId != null) are
+// excluded from cell contents — they live in their parent's "inner view".
 export async function GET() {
   const r = await requirePlaceAccess();
   if ("error" in r) return r.error;
@@ -13,7 +19,10 @@ export async function GET() {
   const locations = await prisma.location.findMany({
     where: { placeId },
     include: {
-      boxes: { orderBy: { stackIndex: "asc" } },
+      boxes: {
+        where: { parentId: null },
+        orderBy: { stackIndex: "asc" },
+      },
     },
     orderBy: [{ row: "asc" }, { col: "asc" }],
   });
@@ -35,6 +44,9 @@ export async function GET() {
         color: b.color,
         tags: parseTags(b.tags),
         stackIndex: b.stackIndex,
+        kind: b.kind,
+        spanW: b.spanW,
+        spanH: b.spanH,
       })),
     }))
   );

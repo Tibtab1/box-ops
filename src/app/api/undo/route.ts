@@ -46,6 +46,15 @@ export async function POST() {
         targetStackIndex: number;
         previousCode: string | null;
       }, placeId);
+    } else if (entry.kind === "move_furniture") {
+      await undoFurnitureMove(entry.payload as {
+        boxId: string;
+        targetLocationId: string | null;
+        targetStackIndex: number;
+        previousCode: string | null;
+        previousSpanW: number;
+        previousSpanH: number;
+      }, placeId);
     } else {
       return NextResponse.json({ error: "Type d'undo non supporté." }, { status: 400 });
     }
@@ -127,6 +136,59 @@ async function undoMove(
     toCode: payload.previousCode,
     fromStackIndex: null,
     toStackIndex: payload.targetStackIndex,
+    reason: "undo",
+  });
+}
+
+async function undoFurnitureMove(
+  payload: {
+    boxId: string;
+    targetLocationId: string | null;
+    targetStackIndex: number;
+    previousCode: string | null;
+    previousSpanW: number;
+    previousSpanH: number;
+  },
+  placeId: string
+) {
+  const box = await prisma.box.findFirst({
+    where: { id: payload.boxId, placeId, kind: "furniture" },
+  });
+  if (!box) throw new Error("Le meuble n'existe plus — impossible d'annuler.");
+
+  if (!payload.targetLocationId || !payload.previousCode) {
+    throw new Error("Les informations d'origine sont incomplètes.");
+  }
+
+  // Validate the target position using the existing helper
+  const { validateFurniturePlacement } = await import("@/lib/furniture");
+  const placement = await validateFurniturePlacement({
+    placeId,
+    anchorCode: payload.previousCode,
+    spanW: payload.previousSpanW,
+    spanH: payload.previousSpanH,
+    ignoreBoxId: box.id,
+  });
+  if (!placement.ok) {
+    throw new Error(placement.error);
+  }
+
+  await prisma.box.update({
+    where: { id: box.id },
+    data: {
+      locationId: placement.anchorLocation.id,
+      spanW: payload.previousSpanW,
+      spanH: payload.previousSpanH,
+      stackIndex: 0,
+    },
+  });
+
+  await logMove({
+    boxId: box.id,
+    fromCode: null,
+    toCode: payload.previousCode,
+    fromStackIndex: null,
+    toStackIndex: 0,
     reason: "undo",
   });
 }

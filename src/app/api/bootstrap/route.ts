@@ -33,7 +33,7 @@ export async function POST() {
           code: `${aisle}-${c + 1}`,
           aisle, slot: c + 1,
           row: r, col: c,
-          type: "cell", capacity: 5, enabled: true,
+          type: "cell", capacity: 20, enabled: true,
         },
       });
     }

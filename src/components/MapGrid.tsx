@@ -139,8 +139,8 @@ export default function MapGrid({
                 isBusy && "opacity-60 pointer-events-none"
               )}
               style={{
-                gridTemplateColumns: `2.25rem repeat(${totalCols}, minmax(4rem, 1fr)) 2.25rem`,
-                gridAutoRows: "4.5rem",
+                gridTemplateColumns: `2.25rem repeat(${totalCols}, 5rem) 2.25rem`,
+                gridAutoRows: "5rem",
               }}
             >
               {/* Left trim/add button */}

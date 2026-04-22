@@ -76,7 +76,7 @@ async function addCellRight(
       code: `${info.aisle}-${slot}`,
       aisle: info.aisle, slot,
       row: body.row, col: info.maxCol + 1,
-      type, capacity: 5, enabled: true,
+      type, capacity: 20, enabled: true,
     },
   });
   return NextResponse.json({ ok: true });
@@ -99,7 +99,7 @@ async function addCellLeft(
         code: `${info.aisle}-${slot}`,
         aisle: info.aisle, slot,
         row: body.row, col: info.minCol - 1,
-        type, capacity: 5, enabled: true,
+        type, capacity: 20, enabled: true,
       },
     });
     return NextResponse.json({ ok: true });
@@ -123,7 +123,7 @@ async function addCellLeft(
       code: `${info.aisle}-${slot}`,
       aisle: info.aisle, slot,
       row: body.row, col: 0,
-      type, capacity: 5, enabled: true,
+      type, capacity: 20, enabled: true,
     },
   });
   return NextResponse.json({ ok: true, shifted: true });
@@ -182,7 +182,7 @@ async function addRow(
         code: `${aisle}-${i + 1}`,
         aisle, slot: i + 1,
         row: newRow, col: startCol + i,
-        type: "cell", capacity: 5, enabled: true,
+        type: "cell", capacity: 20, enabled: true,
       },
     });
   }
@@ -252,7 +252,7 @@ async function resetPlan(
           code: `${aisle}-${c + 1}`,
           aisle, slot: c + 1,
           row: r, col: c,
-          type: "cell", capacity: 5, enabled: true,
+          type: "cell", capacity: 20, enabled: true,
         },
       });
     }

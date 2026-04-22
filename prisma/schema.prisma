@@ -1,6 +1,10 @@
-// Prisma schema — v12 (quality of life)
-// New in v12:
-//   + UndoEntry : reversible action log, scoped per user+place
+// Prisma schema — v13 (furniture)
+// New in v13:
+//   + Box.kind      : "box" (default) | "furniture"
+//   + Box.spanW     : footprint width in cells (1-3, default 1)
+//   + Box.spanH     : footprint height in cells (1-3, default 1)
+//   + Box.parentId  : if set, this box is "inside" a furniture item and does
+//                     not appear on the main plan. locationId is null in that case.
 generator client {
   provider = "prisma-client-js"
 }
@@ -107,16 +111,13 @@ model PlaceInvitation {
   @@index([email])
 }
 
-// Reversible action log. Kept short (last 20 per user per place).
-// `payload` stores the INVERSE operation to perform on undo, as JSON.
-// For example, moving a box from A→B records { boxId, toLocationId: A, toStackIndex: 0 }.
 model UndoEntry {
   id        String   @id @default(cuid())
   userId    String
   placeId   String
-  kind      String   // "move_box" | "reorder_box" | "edit_box" | "create_box" | "delete_box"
-  payload   Json     // inverse action payload
-  label     String   // human-readable description for UI
+  kind      String
+  payload   Json
+  label     String
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   place     Place    @relation(fields: [placeId], references: [id], onDelete: Cascade)
@@ -153,16 +154,23 @@ model Box {
   tags        String    @default("")
   photoUrl    String?
   color       String    @default("#e8602c")
-  locationId  String?
+  kind        String    @default("box")     // "box" | "furniture"
+  spanW       Int       @default(1)         // 1..3
+  spanH       Int       @default(1)         // 1..3
+  locationId  String?                       // null when parentId is set
   stackIndex  Int       @default(0)
+  parentId    String?                       // if set, this box lives inside a furniture item
   place       Place     @relation(fields: [placeId], references: [id], onDelete: Cascade)
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   location    Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  parent      Box?      @relation("BoxContents", fields: [parentId], references: [id], onDelete: SetNull)
+  children    Box[]     @relation("BoxContents")
   moves       Move[]
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   @@index([placeId])
   @@index([locationId, stackIndex])
+  @@index([parentId, stackIndex])
 }
 
 model Move {

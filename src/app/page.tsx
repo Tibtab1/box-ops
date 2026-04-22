@@ -12,6 +12,7 @@ import InventoryList from "@/components/InventoryList";
 import PlanControls from "@/components/PlanControls";
 import CellEditor from "@/components/CellEditor";
 import StackPicker from "@/components/StackPicker";
+import FurnitureDetail from "@/components/FurnitureDetail";
 import ThemeToggle from "@/components/ThemeToggle";
 import UserMenu from "@/components/UserMenu";
 import PlaceSwitcher from "@/components/PlaceSwitcher";
@@ -40,9 +41,11 @@ type RightPanel =
   | { kind: "none" }
   | { kind: "detail"; boxId: string }
   | { kind: "create"; presetCode: string | null }
+  | { kind: "create-in-furniture"; parentId: string }
   | { kind: "edit"; boxId: string }
   | { kind: "stack"; code: string }
-  | { kind: "cell-edit"; code: string };
+  | { kind: "cell-edit"; code: string }
+  | { kind: "furniture-detail"; boxId: string };
 
 export default function HomePage() {
   const [cells, setCells] = useState<CellView[]>([]);
@@ -190,7 +193,9 @@ export default function HomePage() {
   // background tabs) and we skip when the user has an open create/edit
   // form — otherwise polling could replace their in-progress data.
   const pollPaused =
-    rightPanel.kind === "create" || rightPanel.kind === "edit";
+    rightPanel.kind === "create" ||
+    rightPanel.kind === "edit" ||
+    rightPanel.kind === "create-in-furniture";
   useEffect(() => {
     if (pollPaused) return;
     let cancelled = false;
@@ -340,6 +345,30 @@ export default function HomePage() {
     },
     [refresh, pushToast]
   );
+
+  // v13: move a furniture item to a new anchor cell (same span)
+  const handleFurnitureDrop = useCallback(
+    async (furnitureId: string, targetCode: string) => {
+      const res = await fetch(`/api/boxes/${furnitureId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locationCode: targetCode }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        pushToast("error", data.error ?? "Déplacement impossible.");
+        return;
+      }
+      pushToast("success", `Meuble déplacé vers ${targetCode}`);
+      await refresh();
+    },
+    [refresh, pushToast]
+  );
+
+  // v13: open the inner view of a furniture on click
+  const handleFurnitureClick = useCallback((furnitureId: string) => {
+    setRightPanel({ kind: "furniture-detail", boxId: furnitureId });
+  }, []);
 
   const handleUndone = useCallback(async () => {
     pushToast("info", "Action annulée");
@@ -509,10 +538,12 @@ export default function HomePage() {
                       b: boxes.find((b) => b.id === measure.b)?.location?.code,
                     }}
                     onCellClick={handleCellClick}
+                    onFurnitureClick={handleFurnitureClick}
                     placementMode={placementMode}
                     editMode={editMode}
                     onRowMutate={editMode ? handleRowMutate : undefined}
                     onBoxDrop={handleBoxDrop}
+                    onFurnitureDrop={handleFurnitureDrop}
                     dragEnabled={
                       !editMode &&
                       !placementMode &&
@@ -741,6 +772,43 @@ function RightPanel(props: {
           presetLocationCode={panel.presetCode}
           onSaved={onSaved}
           onCancel={() => setPanel({ kind: "none" })}
+        />
+      )}
+
+      {panel.kind === "create-in-furniture" && (
+        <BoxForm
+          mode={{ kind: "create" }}
+          locations={locationsForForm}
+          parentFurnitureId={panel.parentId}
+          onSaved={async (newBoxId) => {
+            await refresh();
+            // After creating the child, return to the furniture detail view
+            setPanel({ kind: "furniture-detail", boxId: panel.parentId });
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            void newBoxId;
+          }}
+          onCancel={() =>
+            setPanel({ kind: "furniture-detail", boxId: panel.parentId })
+          }
+        />
+      )}
+
+      {panel.kind === "furniture-detail" && (
+        <FurnitureDetail
+          furnitureId={panel.boxId}
+          canEdit={!readOnly}
+          onClose={() => {
+            setPanel({ kind: "none" });
+            setFocusedCode(null);
+          }}
+          onEditFurniture={(id) => setPanel({ kind: "edit", boxId: id })}
+          onAddChild={(parentId) =>
+            setPanel({ kind: "create-in-furniture", parentId })
+          }
+          onOpenChild={(childId) =>
+            setPanel({ kind: "detail", boxId: childId })
+          }
+          onMutate={refresh}
         />
       )}
 

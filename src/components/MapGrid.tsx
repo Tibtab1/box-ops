@@ -135,13 +135,12 @@ export default function MapGrid({
             <div
               key={row}
               className={clsx(
-                "grid items-stretch gap-1 mx-auto",
+                "grid items-stretch gap-1",
                 isBusy && "opacity-60 pointer-events-none"
               )}
               style={{
                 gridTemplateColumns: `2.25rem repeat(${totalCols}, 5rem) 2.25rem`,
                 gridAutoRows: "5rem",
-                width: "fit-content",
               }}
             >
               {/* Left trim/add button */}
@@ -161,32 +160,39 @@ export default function MapGrid({
                 <div key={`lpad-${i}`} />
               ))}
 
-              {/* Actual cells */}
-              {rowCells.map((cell) => {
-                const role = cellRoles.get(cell.code) ?? { role: "normal" };
-                return (
-                  <CellOrFurniture
-                    key={cell.id}
-                    cell={cell}
-                    role={role}
-                    cellByCode={cellByCode}
-                    dragged={dragged}
-                    setDragged={setDragged}
-                    dragOverCode={dragOverCode}
-                    setDragOverCode={setDragOverCode}
-                    dragEnabled={!!dragEnabled}
-                    onBoxDrop={onBoxDrop}
-                    onFurnitureDrop={onFurnitureDrop}
-                    onCellClick={onCellClick}
-                    onFurnitureClick={onFurnitureClick}
-                    selectedCode={selectedCode}
-                    highlightedCodes={highlightedCodes}
-                    measureEndpoints={measureEndpoints}
-                    placementMode={placementMode}
-                    editMode={editMode}
-                  />
-                );
-              })}
+              {/* Actual cells — we filter out "covered-by-furniture" cells
+                  entirely. Rendering them as empty divs would push the grid
+                  indexing off by one and hide the last cell of the row. */}
+              {rowCells
+                .filter((cell) => {
+                  const r = cellRoles.get(cell.code) ?? { role: "normal" };
+                  return r.role !== "covered-by-furniture";
+                })
+                .map((cell) => {
+                  const role = cellRoles.get(cell.code) ?? { role: "normal" };
+                  return (
+                    <CellOrFurniture
+                      key={cell.id}
+                      cell={cell}
+                      role={role}
+                      cellByCode={cellByCode}
+                      dragged={dragged}
+                      setDragged={setDragged}
+                      dragOverCode={dragOverCode}
+                      setDragOverCode={setDragOverCode}
+                      dragEnabled={!!dragEnabled}
+                      onBoxDrop={onBoxDrop}
+                      onFurnitureDrop={onFurnitureDrop}
+                      onCellClick={onCellClick}
+                      onFurnitureClick={onFurnitureClick}
+                      selectedCode={selectedCode}
+                      highlightedCodes={highlightedCodes}
+                      measureEndpoints={measureEndpoints}
+                      placementMode={placementMode}
+                      editMode={editMode}
+                    />
+                  );
+                })}
 
               {/* Right padding */}
               {Array.from({ length: rightPadding }).map((_, i) => (

@@ -4,8 +4,16 @@ import { auth } from "@/auth";
 
 export const dynamic = "force-dynamic";
 
-// POST /api/bootstrap — if the current user owns NO place yet, create a
-// default place "Mon premier lieu" with a starter 3×4 plan.
+// POST /api/bootstrap
+//
+// Previously: would auto-create a default "Mon premier lieu" with a 3×4 grid
+// the first time an authenticated user visited the app.
+//
+// v13+: we no longer create anything automatically. The user now goes through
+// an onboarding flow where they explicitly choose a starter preset (or start
+// empty). This endpoint now just reports whether the user already owns any
+// place — the client uses that to decide whether to show the main app or
+// redirect to /onboarding.
 export async function POST() {
   const session = await auth();
   const userId = (session?.user as { id?: string } | undefined)?.id;
@@ -14,32 +22,15 @@ export async function POST() {
   }
 
   const ownedCount = await prisma.place.count({ where: { ownerId: userId } });
-  if (ownedCount > 0) {
-    return NextResponse.json({ ok: true, created: false });
-  }
+  // Also count places the user has been invited to
+  const sharedCount = await prisma.placeShare.count({ where: { userId } });
 
-  const place = await prisma.place.create({
-    data: { name: "Mon premier lieu", ownerId: userId },
-  });
-
-  const ROWS = 3;
-  const COLS = 4;
-  for (let r = 1; r <= ROWS; r++) {
-    const aisle = `R${r}`;
-    for (let c = 0; c < COLS; c++) {
-      await prisma.location.create({
-        data: {
-          placeId: place.id, userId,
-          code: `${aisle}-${c + 1}`,
-          aisle, slot: c + 1,
-          row: r, col: c,
-          type: "cell", capacity: 20, enabled: true,
-        },
-      });
-    }
-  }
+  const hasPlaces = ownedCount + sharedCount > 0;
 
   return NextResponse.json({
-    ok: true, created: true, placeId: place.id,
+    ok: true,
+    hasPlaces,
+    ownedCount,
+    sharedCount,
   });
 }

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
+import { createStarterPlan } from "@/lib/create-starter-plan";
+import { findPreset, EMPTY_PRESET_ID } from "@/lib/plan-presets";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +44,8 @@ export async function GET() {
 }
 
 // POST /api/places — create a new place owned by the current user
+// Body: { name: string, description?: string, preset?: "closet" | "cellar" | ... | "empty" }
+// If preset is provided (and not "empty"), a starter plan is created.
 export async function POST(req: NextRequest) {
   const session = await auth();
   const userId = (session?.user as { id?: string } | undefined)?.id;
@@ -53,6 +57,8 @@ export async function POST(req: NextRequest) {
   const name = typeof body?.name === "string" ? body.name.trim() : "";
   const description =
     typeof body?.description === "string" ? body.description.trim() : null;
+  const presetId =
+    typeof body?.preset === "string" ? body.preset : EMPTY_PRESET_ID;
 
   if (!name) {
     return NextResponse.json(
@@ -71,5 +77,26 @@ export async function POST(req: NextRequest) {
     data: { name, description, ownerId: userId },
   });
 
-  return NextResponse.json({ id: place.id, name: place.name }, { status: 201 });
+  let cellsCreated = 0;
+  if (presetId !== EMPTY_PRESET_ID) {
+    const preset = findPreset(presetId);
+    if (preset) {
+      cellsCreated = await createStarterPlan({
+        placeId: place.id,
+        userId,
+        rows: preset.rows,
+        cols: preset.cols,
+      });
+    }
+  }
+
+  return NextResponse.json(
+    {
+      id: place.id,
+      name: place.name,
+      preset: presetId,
+      cellsCreated,
+    },
+    { status: 201 }
+  );
 }

@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import clsx from "clsx";
+import PlacePresetPicker from "@/components/PlacePresetPicker";
 
 type Place = {
   id: string;
@@ -22,9 +24,17 @@ export default function PlaceSwitcher({ onActivePlaceChange }: Props) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState(false); // modal open flag
   const [newName, setNewName] = useState("");
+  const [newPreset, setNewPreset] = useState<string>("cellar");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false); // needed for SSR-safe portal
   const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   async function load() {
     const [placesRes, activeRes] = await Promise.all([
@@ -40,18 +50,28 @@ export default function PlaceSwitcher({ onActivePlaceChange }: Props) {
     load();
   }, []);
 
-  // Close on outside click — more reliable than onBlur which fights with child clicks
+  // Close dropdown on outside click
   useEffect(() => {
     if (!open) return;
     function onDocClick(e: MouseEvent) {
       if (!rootRef.current?.contains(e.target as Node)) {
         setOpen(false);
-        setCreating(false);
       }
     }
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
+
+  // Lock body scroll when modal is open
+  useEffect(() => {
+    if (creating) {
+      const prev = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = prev;
+      };
+    }
+  }, [creating]);
 
   async function pickPlace(id: string) {
     if (id === activeId) {
@@ -72,22 +92,34 @@ export default function PlaceSwitcher({ onActivePlaceChange }: Props) {
   async function createPlace(e: React.FormEvent) {
     e.preventDefault();
     const name = newName.trim();
-    if (!name) return;
-    const res = await fetch("/api/places", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    if (!res.ok) return;
-    const data = await res.json();
-    setNewName("");
-    setCreating(false);
-    await fetch("/api/places/active", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ placeId: data.id }),
-    });
-    window.location.reload();
+    if (!name || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/places", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, preset: newPreset }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Erreur lors de la création.");
+        setBusy(false);
+        return;
+      }
+      setNewName("");
+      setNewPreset("cellar");
+      setCreating(false);
+      await fetch("/api/places/active", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ placeId: data.id }),
+      });
+      window.location.reload();
+    } catch {
+      setError("Erreur réseau.");
+      setBusy(false);
+    }
   }
 
   const active = places.find((p) => p.id === activeId);
@@ -99,6 +131,105 @@ export default function PlaceSwitcher({ onActivePlaceChange }: Props) {
       </div>
     );
   }
+
+  // The modal is rendered via a portal into <body>, so it cannot be clipped
+  // by any parent overflow, transform, or stacking context.
+  const modalContent = creating && (
+    <div
+      style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 9999,
+        backgroundColor: "rgba(10, 20, 40, 0.75)",
+        backdropFilter: "blur(4px)",
+        display: "flex",
+        alignItems: "flex-start",
+        justifyContent: "center",
+        padding: "2rem 1rem",
+        overflowY: "auto",
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !busy) {
+          setCreating(false);
+          setError(null);
+        }
+      }}
+    >
+      <form
+        onSubmit={createPlace}
+        className="panel w-full max-w-xl p-6 space-y-5"
+        style={{ marginTop: "4vh", marginBottom: "4vh" }}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="font-mono text-[11px] uppercase tracking-[0.25em] text-ink/60">
+              Nouveau lieu
+            </div>
+            <h2 className="font-display text-2xl font-black text-ink leading-tight mt-0.5">
+              Configurer l'espace
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (!busy) {
+                setCreating(false);
+                setError(null);
+              }
+            }}
+            className="btn-ghost !px-2.5 !py-1.5"
+            aria-label="Fermer"
+          >
+            ✕
+          </button>
+        </div>
+
+        <label className="block">
+          <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-ink/70 block mb-1.5">
+            Nom du lieu
+          </span>
+          <input
+            type="text"
+            autoFocus
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            className="input-field"
+            placeholder="Ex: Garage, Cave, Box self-storage…"
+            maxLength={80}
+            required
+          />
+        </label>
+
+        <PlacePresetPicker value={newPreset} onChange={setNewPreset} />
+
+        {error && (
+          <div className="font-mono text-xs uppercase tracking-widest text-safety bg-safety/10 border-2 border-safety px-3 py-2">
+            {error}
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-2 pt-2">
+          <button
+            type="button"
+            onClick={() => {
+              setCreating(false);
+              setError(null);
+            }}
+            className="btn-ghost"
+            disabled={busy}
+          >
+            Annuler
+          </button>
+          <button type="submit" className="btn-primary" disabled={busy}>
+            {busy ? "Création…" : "Créer le lieu"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
 
   return (
     <div className="relative" ref={rootRef}>
@@ -159,52 +290,27 @@ export default function PlaceSwitcher({ onActivePlaceChange }: Props) {
           </ul>
 
           <div className="border-t-2 border-dashed border-ink/15 p-2">
-            {creating ? (
-              <form onSubmit={createPlace} className="space-y-2">
-                <input
-                  type="text"
-                  autoFocus
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  className="input-field !py-1.5 !text-sm"
-                  placeholder="Nom du nouveau lieu"
-                  maxLength={80}
-                />
-                <div className="grid grid-cols-2 gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCreating(false);
-                      setNewName("");
-                    }}
-                    className="btn-ghost !text-[10px] !py-1.5"
-                  >
-                    Annuler
-                  </button>
-                  <button type="submit" className="btn-primary !text-[10px] !py-1.5">
-                    Créer
-                  </button>
-                </div>
-              </form>
-            ) : (
-              <>
-                <button
-                  onClick={() => setCreating(true)}
-                  className="w-full px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-ink hover:bg-paper-dark text-left"
-                >
-                  + Nouveau lieu
-                </button>
-                <a
-                  href="/places"
-                  className="block px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-ink/70 hover:bg-paper-dark text-left"
-                >
-                  ⚙ Gérer mes lieux
-                </a>
-              </>
-            )}
+            <button
+              onClick={() => {
+                setCreating(true);
+                setOpen(false);
+              }}
+              className="w-full px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-ink hover:bg-paper-dark text-left"
+            >
+              + Nouveau lieu
+            </button>
+            <a
+              href="/places"
+              className="block px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-ink/70 hover:bg-paper-dark text-left"
+            >
+              ⚙ Gérer mes lieux
+            </a>
           </div>
         </div>
       )}
+
+      {/* Render modal through a portal so it escapes any parent stacking context */}
+      {mounted && modalContent && createPortal(modalContent, document.body)}
     </div>
   );
 }

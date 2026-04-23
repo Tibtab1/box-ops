@@ -135,12 +135,13 @@ export default function MapGrid({
             <div
               key={row}
               className={clsx(
-                "grid items-stretch gap-1",
+                "grid items-stretch gap-1 mx-auto",
                 isBusy && "opacity-60 pointer-events-none"
               )}
               style={{
                 gridTemplateColumns: `2.25rem repeat(${totalCols}, 5rem) 2.25rem`,
                 gridAutoRows: "5rem",
+                width: "fit-content",
               }}
             >
               {/* Left trim/add button */}

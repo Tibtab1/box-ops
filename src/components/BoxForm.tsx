@@ -158,17 +158,17 @@ export default function BoxForm({
     } else if (kind === "furniture") {
       payload.kind = "furniture";
       payload.spanW = spanW;
-      payload.spanH = 1; // UI only supports horizontal furniture for now
+      payload.spanH = spanH;
       payload.locationCode = locationCode || null;
     } else {
       payload.kind = "box";
       payload.locationCode = locationCode || null;
     }
 
-    // For edit mode on furniture, allow resizing width only
+    // For edit mode on furniture, allow resizing
     if (mode.kind === "edit" && kind === "furniture") {
       payload.spanW = spanW;
-      payload.spanH = 1;
+      payload.spanH = spanH;
     }
 
     try {
@@ -268,7 +268,7 @@ export default function BoxForm({
 
       {/* Furniture dimensions picker */}
       {kind === "furniture" && !insideFurniture && (
-        <Field label="Largeur (nombre de cellules)">
+        <Field label="Dimensions (cellules)">
           <div className="grid grid-cols-3 gap-2">
             {[1, 2, 3].map((w) => (
               <button
@@ -282,12 +282,27 @@ export default function BoxForm({
                     : "border-ink/30 text-ink/70 hover:border-ink"
                 )}
               >
-                {w} cellule{w > 1 ? "s" : ""}
+                Largeur {w}
+              </button>
+            ))}
+            {[1, 2, 3].map((h) => (
+              <button
+                key={`h${h}`}
+                type="button"
+                onClick={() => setSpanH(h)}
+                className={clsx(
+                  "font-mono text-xs uppercase tracking-widest py-2 border-2 transition-all",
+                  spanH === h
+                    ? "bg-ink text-paper border-ink"
+                    : "border-ink/30 text-ink/70 hover:border-ink"
+                )}
+              >
+                Hauteur {h}
               </button>
             ))}
           </div>
           <p className="font-mono text-[9px] uppercase tracking-widest text-ink/50 mt-1.5">
-            Le meuble occupera {spanW} cellule{spanW > 1 ? "s" : ""} côte à côte sur la même rangée.
+            Ce meuble occupera une zone de {spanW}×{spanH} cellules sur le plan.
           </p>
         </Field>
       )}
@@ -418,7 +433,7 @@ export default function BoxForm({
         <Field
           label={
             kind === "furniture"
-              ? `Cellule de départ (×${spanW})`
+              ? `Cellule d'ancrage (${spanW}×${spanH})`
               : "Emplacement"
           }
           required={kind === "furniture"}
@@ -444,7 +459,7 @@ export default function BoxForm({
           </select>
           <p className="font-mono text-[10px] text-ink/50 mt-1">
             {kind === "furniture"
-              ? `Le meuble couvrira cette cellule${spanW > 1 ? ` et ${spanW - 1} cellule(s) à sa droite.` : "."}`
+              ? `Le meuble couvrira cette cellule et ${spanW * spanH - 1} cellule(s) voisine(s) vers le bas-droite.`
               : "La boîte sera placée au-dessus de la pile."}
           </p>
         </Field>

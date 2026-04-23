@@ -11,7 +11,6 @@ type Props = {
   highlightedCodes?: Set<string>;
   measureEndpoints?: { a?: string | null; b?: string | null };
   onCellClick?: (cell: CellView) => void;
-  /** Called when a furniture block is clicked (to open its inner view). */
   onFurnitureClick?: (furnitureId: string) => void;
   placementMode?: boolean;
   editMode?: boolean;
@@ -19,14 +18,25 @@ type Props = {
     row: number,
     action: "add_left" | "add_right" | "remove_left" | "remove_right"
   ) => Promise<void>;
-  /** Called when a box is drag-dropped from one cell to another. */
   onBoxDrop?: (boxId: string, targetCode: string) => Promise<void>;
-  /** Called when a furniture is drag-dropped. */
   onFurnitureDrop?: (furnitureId: string, targetCode: string) => Promise<void>;
-  /** When true, boxes on top of stacks can be dragged. */
   dragEnabled?: boolean;
 };
 
+/**
+ * v13.5 — Unified single-grid rendering.
+ *
+ * Architecture change: instead of one CSS grid per row (which prevented
+ * vertical furniture spans), we now place every cell in ONE big CSS grid.
+ * Each cell specifies its `gridRow` and `gridColumn` explicitly based on
+ * its (row, col) coordinates. Furniture anchors additionally use
+ * `span N` to cover multiple grid tracks, cells covered by furniture
+ * are simply not rendered.
+ *
+ * Row-edge buttons (add/remove cells) are rendered as a separate thin
+ * column to the left and right of the main grid, with explicit row
+ * placement to align with each data row.
+ */
 export default function MapGrid({
   cells,
   selectedCode,
@@ -41,53 +51,60 @@ export default function MapGrid({
   onFurnitureDrop,
   dragEnabled,
 }: Props) {
-  // Group cells by row for aligned rendering
-  const { rowsData, globalMinCol, globalMaxCol, cellRoles, cellByCode } =
-    useMemo(() => {
-      if (cells.length === 0) {
-        return {
-          rowsData: [],
-          globalMinCol: 0,
-          globalMaxCol: 0,
-          cellRoles: new Map<string, CellRenderRole>(),
-          cellByCode: new Map<string, CellView>(),
-        };
-      }
-      const byRow = new Map<number, CellView[]>();
-      for (const c of cells) {
-        const arr = byRow.get(c.row) ?? [];
-        arr.push(c);
-        byRow.set(c.row, arr);
-      }
-      const rowsData = [...byRow.entries()]
-        .sort(([a], [b]) => a - b)
-        .map(([row, arr]) => {
-          arr.sort((a, b) => a.col - b.col);
-          return {
-            row,
-            cells: arr,
-            minCol: arr[0].col,
-            maxCol: arr[arr.length - 1].col,
-          };
-        });
-      const globalMinCol = Math.min(...rowsData.map((r) => r.minCol));
-      const globalMaxCol = Math.max(...rowsData.map((r) => r.maxCol));
+  const {
+    rowsList,
+    globalMinCol,
+    globalMaxCol,
+    totalCols,
+    cellRoles,
+    cellByCode,
+  } = useMemo(() => {
+    if (cells.length === 0) {
+      return {
+        rowsList: [] as Array<{ row: number; cells: CellView[] }>,
+        globalMinCol: 0,
+        globalMaxCol: 0,
+        totalCols: 0,
+        cellRoles: new Map<string, CellRenderRole>(),
+        cellByCode: new Map<string, CellView>(),
+      };
+    }
+    const byRow = new Map<number, CellView[]>();
+    for (const c of cells) {
+      const arr = byRow.get(c.row) ?? [];
+      arr.push(c);
+      byRow.set(c.row, arr);
+    }
+    const rowsList = [...byRow.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([row, arr]) => {
+        arr.sort((a, b) => a.col - b.col);
+        return { row, cells: arr };
+      });
+    const globalMinCol = Math.min(...cells.map((c) => c.col));
+    const globalMaxCol = Math.max(...cells.map((c) => c.col));
+    const totalCols = globalMaxCol - globalMinCol + 1;
 
-      // Build a map cellId -> boxes for computeCellRoles
-      const boxesByCellId = new Map<string, CellBoxLite[]>();
-      for (const c of cells) {
-        boxesByCellId.set(c.id, c.boxes);
-      }
-      const cellRoles = computeCellRoles(cells, boxesByCellId);
+    const boxesByCellId = new Map<string, CellBoxLite[]>();
+    for (const c of cells) {
+      boxesByCellId.set(c.id, c.boxes);
+    }
+    const cellRoles = computeCellRoles(cells, boxesByCellId);
 
-      const cellByCode = new Map<string, CellView>();
-      for (const c of cells) cellByCode.set(c.code, c);
+    const cellByCode = new Map<string, CellView>();
+    for (const c of cells) cellByCode.set(c.code, c);
 
-      return { rowsData, globalMinCol, globalMaxCol, cellRoles, cellByCode };
-    }, [cells]);
+    return {
+      rowsList,
+      globalMinCol,
+      globalMaxCol,
+      totalCols,
+      cellRoles,
+      cellByCode,
+    };
+  }, [cells]);
 
   const [busyRow, setBusyRow] = useState<number | null>(null);
-  // Drag state
   const [dragged, setDragged] = useState<
     | { kind: "box"; id: string; fromCode: string }
     | { kind: "furniture"; id: string; fromCode: string }
@@ -108,7 +125,7 @@ export default function MapGrid({
     }
   }
 
-  if (rowsData.length === 0) {
+  if (rowsList.length === 0) {
     return (
       <div className="panel p-10 text-center space-y-2">
         <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-ink/40">
@@ -121,143 +138,161 @@ export default function MapGrid({
     );
   }
 
-  const totalCols = globalMaxCol - globalMinCol + 1;
+  // Map row number → row index (1-based for CSS grid)
+  const rowIndexByRow = new Map<number, number>();
+  rowsList.forEach(({ row }, idx) => {
+    rowIndexByRow.set(row, idx + 1);
+  });
+
+  // Map col number → col index (1-based for CSS grid, after the left-edge column)
+  // Grid layout: [edge-left] [col 0] [col 1] ... [col N-1] [edge-right]
+  const colToGridCol = (col: number): number => col - globalMinCol + 2;
+
+  // For each row we precompute its min/max col to know where edge buttons go
+  const rowBounds = new Map<number, { minCol: number; maxCol: number }>();
+  for (const { row, cells: rc } of rowsList) {
+    rowBounds.set(row, {
+      minCol: rc[0].col,
+      maxCol: rc[rc.length - 1].col,
+    });
+  }
 
   return (
     <div className="relative">
-      <div className="space-y-2 overflow-x-auto">
-        {rowsData.map(({ row, cells: rowCells, minCol, maxCol }) => {
-          const leftPadding = minCol - globalMinCol;
-          const rightPadding = globalMaxCol - maxCol;
-          const isBusy = busyRow === row;
+      <div className="overflow-x-auto">
+        <div
+          className="grid mx-auto"
+          style={{
+            gridTemplateColumns: `2.25rem repeat(${totalCols}, 5rem) 2.25rem`,
+            gridAutoRows: "5rem",
+            gap: "0.25rem",
+            width: "fit-content",
+          }}
+        >
+          {/* Left edge buttons, one per row (only in editMode) */}
+          {editMode &&
+            rowsList.map(({ row }) => {
+              const rIdx = rowIndexByRow.get(row)!;
+              const rc = rowsList.find((r) => r.row === row)!.cells.length;
+              const isBusy = busyRow === row;
+              return (
+                <div
+                  key={`edge-l-${row}`}
+                  style={{ gridColumn: 1, gridRow: rIdx }}
+                  className={clsx(
+                    "flex flex-col gap-1",
+                    isBusy && "opacity-60 pointer-events-none"
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => mutate(row, "add_left")}
+                    title="Ajouter une cellule à gauche"
+                    className="flex-1 w-full border-2 border-dashed border-ink/40 hover:border-ink hover:bg-paper-dark grid place-items-center font-mono text-sm text-ink/50 hover:text-ink"
+                  >
+                    +
+                  </button>
+                  {rc > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => mutate(row, "remove_left")}
+                      title="Retirer la cellule de gauche"
+                      className="w-full h-6 border-2 border-dashed border-safety/40 hover:border-safety hover:bg-safety/10 grid place-items-center font-mono text-[10px] text-safety/60 hover:text-safety"
+                    >
+                      −
+                    </button>
+                  )}
+                </div>
+              );
+            })}
 
-          return (
-            <div
-              key={row}
-              className={clsx(
-                "grid items-stretch gap-1",
-                isBusy && "opacity-60 pointer-events-none"
-              )}
-              style={{
-                gridTemplateColumns: `2.25rem repeat(${totalCols}, 5rem) 2.25rem`,
-                gridAutoRows: "5rem",
-              }}
-            >
-              {/* Left trim/add button */}
-              {editMode && rowCells.length > 0 ? (
-                <RowEdgeButtons
-                  side="left"
-                  onAdd={() => mutate(row, "add_left")}
-                  onRemove={() => mutate(row, "remove_left")}
-                  canRemove={rowCells.length > 1}
+          {/* Right edge buttons */}
+          {editMode &&
+            rowsList.map(({ row }) => {
+              const rIdx = rowIndexByRow.get(row)!;
+              const rc = rowsList.find((r) => r.row === row)!.cells.length;
+              const isBusy = busyRow === row;
+              return (
+                <div
+                  key={`edge-r-${row}`}
+                  style={{ gridColumn: totalCols + 2, gridRow: rIdx }}
+                  className={clsx(
+                    "flex flex-col gap-1",
+                    isBusy && "opacity-60 pointer-events-none"
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => mutate(row, "add_right")}
+                    title="Ajouter une cellule à droite"
+                    className="flex-1 w-full border-2 border-dashed border-ink/40 hover:border-ink hover:bg-paper-dark grid place-items-center font-mono text-sm text-ink/50 hover:text-ink"
+                  >
+                    +
+                  </button>
+                  {rc > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => mutate(row, "remove_right")}
+                      title="Retirer la cellule de droite"
+                      className="w-full h-6 border-2 border-dashed border-safety/40 hover:border-safety hover:bg-safety/10 grid place-items-center font-mono text-[10px] text-safety/60 hover:text-safety"
+                    >
+                      −
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+
+          {/* All cells, each placed at its (row, col) explicitly.
+              Cells covered by a furniture anchor are skipped — the anchor
+              spans their area via grid-column/grid-row span. */}
+          {cells
+            .filter((cell) => {
+              const r = cellRoles.get(cell.code) ?? { role: "normal" };
+              return r.role !== "covered-by-furniture";
+            })
+            .map((cell) => {
+              const role = cellRoles.get(cell.code) ?? { role: "normal" };
+              const rIdx = rowIndexByRow.get(cell.row)!;
+              const cIdx = colToGridCol(cell.col);
+              return (
+                <CellOrFurniture
+                  key={cell.id}
+                  cell={cell}
+                  role={role}
+                  gridRow={rIdx}
+                  gridCol={cIdx}
+                  dragged={dragged}
+                  setDragged={setDragged}
+                  dragOverCode={dragOverCode}
+                  setDragOverCode={setDragOverCode}
+                  dragEnabled={!!dragEnabled}
+                  onBoxDrop={onBoxDrop}
+                  onFurnitureDrop={onFurnitureDrop}
+                  onCellClick={onCellClick}
+                  onFurnitureClick={onFurnitureClick}
+                  selectedCode={selectedCode}
+                  highlightedCodes={highlightedCodes}
+                  measureEndpoints={measureEndpoints}
+                  placementMode={placementMode}
+                  editMode={editMode}
                 />
-              ) : (
-                <div />
-              )}
-
-              {/* Left empty cells (alignment) */}
-              {Array.from({ length: leftPadding }).map((_, i) => (
-                <div key={`lpad-${i}`} />
-              ))}
-
-              {/* Actual cells — we filter out "covered-by-furniture" cells
-                  entirely. Rendering them as empty divs would push the grid
-                  indexing off by one and hide the last cell of the row. */}
-              {rowCells
-                .filter((cell) => {
-                  const r = cellRoles.get(cell.code) ?? { role: "normal" };
-                  return r.role !== "covered-by-furniture";
-                })
-                .map((cell) => {
-                  const role = cellRoles.get(cell.code) ?? { role: "normal" };
-                  return (
-                    <CellOrFurniture
-                      key={cell.id}
-                      cell={cell}
-                      role={role}
-                      cellByCode={cellByCode}
-                      dragged={dragged}
-                      setDragged={setDragged}
-                      dragOverCode={dragOverCode}
-                      setDragOverCode={setDragOverCode}
-                      dragEnabled={!!dragEnabled}
-                      onBoxDrop={onBoxDrop}
-                      onFurnitureDrop={onFurnitureDrop}
-                      onCellClick={onCellClick}
-                      onFurnitureClick={onFurnitureClick}
-                      selectedCode={selectedCode}
-                      highlightedCodes={highlightedCodes}
-                      measureEndpoints={measureEndpoints}
-                      placementMode={placementMode}
-                      editMode={editMode}
-                    />
-                  );
-                })}
-
-              {/* Right padding */}
-              {Array.from({ length: rightPadding }).map((_, i) => (
-                <div key={`rpad-${i}`} />
-              ))}
-
-              {/* Right trim/add button */}
-              {editMode && rowCells.length > 0 ? (
-                <RowEdgeButtons
-                  side="right"
-                  onAdd={() => mutate(row, "add_right")}
-                  onRemove={() => mutate(row, "remove_right")}
-                  canRemove={rowCells.length > 1}
-                />
-              ) : (
-                <div />
-              )}
-            </div>
-          );
-        })}
+              );
+            })}
+        </div>
       </div>
     </div>
   );
-}
-
-function RowEdgeButtons({
-  side,
-  onAdd,
-  onRemove,
-  canRemove,
-}: {
-  side: "left" | "right";
-  onAdd: () => void;
-  onRemove: () => void;
-  canRemove: boolean;
-}) {
-  return (
-    <div className="flex flex-col gap-1">
-      <button
-        type="button"
-        onClick={onAdd}
-        title={`Ajouter une cellule ${side === "left" ? "à gauche" : "à droite"}`}
-        className="flex-1 w-full border-2 border-dashed border-ink/40 hover:border-ink hover:bg-paper-dark grid place-items-center font-mono text-sm text-ink/50 hover:text-ink"
-      >
-        +
-      </button>
-      {canRemove && (
-        <button
-          type="button"
-          onClick={onRemove}
-          title={`Retirer la cellule ${side === "left" ? "de gauche" : "de droite"}`}
-          className="w-full h-6 border-2 border-dashed border-safety/40 hover:border-safety hover:bg-safety/10 grid place-items-center font-mono text-[10px] text-safety/60 hover:text-safety"
-        >
-          −
-        </button>
-      )}
-    </div>
-  );
+  // cellByCode is kept for future use (neighbor lookups etc.)
+  void cellByCode;
 }
 
 // ─── Cell or furniture block ──────────────────────────────────────────
 function CellOrFurniture(props: {
   cell: CellView;
   role: CellRenderRole;
-  cellByCode: Map<string, CellView>;
+  gridRow: number;
+  gridCol: number;
   dragged:
     | { kind: "box"; id: string; fromCode: string }
     | { kind: "furniture"; id: string; fromCode: string }
@@ -282,15 +317,11 @@ function CellOrFurniture(props: {
   editMode?: boolean;
 }) {
   const {
-    cell, role, dragged, setDragged, dragOverCode, setDragOverCode,
+    cell, role, gridRow, gridCol,
+    dragged, setDragged, dragOverCode, setDragOverCode,
     dragEnabled, onBoxDrop, onFurnitureDrop, onCellClick, onFurnitureClick,
     selectedCode, highlightedCodes, measureEndpoints, placementMode, editMode,
   } = props;
-
-  // Covered cells are not rendered (the furniture anchor spans over them).
-  if (role.role === "covered-by-furniture") {
-    return <div aria-hidden className="pointer-events-none" />;
-  }
 
   const isSelected = selectedCode === cell.code;
   const isHighlighted = highlightedCodes?.has(cell.code);
@@ -309,8 +340,8 @@ function CellOrFurniture(props: {
       <div
         className="relative"
         style={{
-          gridColumn: `span ${spanW}`,
-          gridRow: `span ${spanH}`,
+          gridRow: `${gridRow} / span ${spanH}`,
+          gridColumn: `${gridCol} / span ${spanW}`,
         }}
       >
         <button
@@ -338,7 +369,6 @@ function CellOrFurniture(props: {
           style={{ backgroundColor: color }}
           aria-label={`Meuble ${name}`}
         >
-          {/* Wood-grain-like subtle diagonal lines */}
           <div
             className="absolute inset-0 opacity-15 pointer-events-none"
             style={{
@@ -350,7 +380,7 @@ function CellOrFurniture(props: {
             {cell.code}
           </span>
           <span className="absolute top-1 right-1 font-mono text-[9px] tracking-wider px-1 border border-paper/40 bg-black/30 text-paper/90">
-            🪑 ×{spanW}
+            🪑 {spanW}×{spanH}
           </span>
           <span className="absolute inset-x-2 bottom-2 font-display font-black text-paper text-lg leading-tight line-clamp-3 drop-shadow">
             {name}
@@ -360,10 +390,19 @@ function CellOrFurniture(props: {
     );
   }
 
-  // ─── Normal cell ───
+  // Normal cell rendering — we wrap it in a placement div
+  const placementStyle = {
+    gridRow: gridRow,
+    gridColumn: gridCol,
+  };
+
+  // ─── Aisle ───
   if (cell.type === "aisle") {
     return (
-      <div className="border border-dashed border-ink/15 bg-transparent grid place-items-center">
+      <div
+        style={placementStyle}
+        className="border border-dashed border-ink/15 bg-transparent grid place-items-center"
+      >
         <span className="font-mono text-[8px] uppercase tracking-widest text-ink/30">
           {cell.code}
         </span>
@@ -371,10 +410,12 @@ function CellOrFurniture(props: {
     );
   }
 
+  // ─── Wall ───
   if (cell.type === "wall") {
     return (
       <button
         type="button"
+        style={placementStyle}
         onClick={() => onCellClick?.(cell)}
         className={clsx(
           "w-full h-full border border-ink/20 bg-ink/10 relative grid place-items-center",
@@ -388,14 +429,13 @@ function CellOrFurniture(props: {
     );
   }
 
-  // Cell: normal (possibly stacked boxes)
+  // ─── Normal cell (possibly stacked boxes) ───
   const boxStack = cell.boxes.filter((b) => b.kind === "box");
   const topBox = boxStack[boxStack.length - 1];
   const stackSize = boxStack.length;
   const occupied = stackSize > 0;
   const clickable = editMode || placementMode || !!onCellClick;
 
-  // Drop target logic:
   const isBoxDropTarget =
     dragEnabled &&
     dragged?.kind === "box" &&
@@ -406,12 +446,15 @@ function CellOrFurniture(props: {
   const isDropTarget = isBoxDropTarget || isFurnitureDropTarget;
   const isDragOverHere = isDropTarget && dragOverCode === cell.code;
 
-  // Can top box be dragged from this cell?
   const canDragTop = dragEnabled && occupied;
 
   return (
     <button
       type="button"
+      style={{
+        ...placementStyle,
+        backgroundColor: occupied && topBox ? topBox.color : undefined,
+      }}
       disabled={!clickable && !isDropTarget}
       onClick={() => onCellClick?.(cell)}
       draggable={canDragTop}
@@ -465,12 +508,6 @@ function CellOrFurniture(props: {
         isDragOverHere && "ring-4 ring-blueprint scale-[1.03] z-10",
         !clickable && !isDropTarget && "cursor-default"
       )}
-      style={occupied && topBox ? { backgroundColor: topBox.color } : undefined}
-      aria-label={
-        occupied && topBox
-          ? `${cell.code} — ${topBox.name} (${stackSize})`
-          : `${cell.code} — vide`
-      }
     >
       <span
         className={clsx(

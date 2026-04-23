@@ -146,7 +146,7 @@ export default function FurnitureDetail({
         <div className="relative flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-paper/80">
-              Meuble · {parent.spanW} cellule{parent.spanW > 1 ? "s" : ""}
+              Meuble · {parent.spanW}×{parent.spanH} cellules
             </div>
             <h2 className="font-display text-2xl font-black text-paper break-words leading-tight mt-0.5">
               {parent.name}

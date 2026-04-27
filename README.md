@@ -1,114 +1,104 @@
-# BOX·OPS — onboarding nouveaux utilisateurs
+# BOX·OPS — Améliorations cadres
 
-## Ce qui change
+3 améliorations sur la feature cadres :
 
-**Avant** : un nouvel utilisateur qui se connecte pour la première fois arrivait sur un plan 3×4 "Mon premier lieu" créé automatiquement. Pas de choix.
+## 1. Drag & drop des cadres entre arêtes
 
-**Après** : premier login → redirection vers un **écran d'onboarding plein** qui demande :
-- Un nom de lieu
-- Un modèle parmi les 4 presets (placard / cave / garage / entrepôt) + option vide
+Tu peux maintenant **glisser-déposer une barre de cadre** vers une autre arête du plan, sans passer par "Supprimer + Recréer".
 
-Une fois validé, le lieu est créé et l'utilisateur arrive sur l'app normalement.
+**Comment ça marche** :
+- Survole une barre de cadre → curseur "grab" + tooltip "clic pour éditer · glisser pour déplacer"
+- Clique-maintiens et tire → la barre devient semi-transparente, **toutes les arêtes du plan deviennent des zones de drop** en bleu pâle
+- Pendant le drag, la zone survolée s'illumine en **orange safety** (couleur de cible)
+- Lâche sur l'arête voulue → le cadre est déplacé en base via PATCH, toast de confirmation
+
+**Conditions d'activation** :
+- Le drag fonctionne dans le même contexte que celui des boîtes (rôle owner/admin/editor, pas en mode édition du plan, pas en mode placement)
+- Le clic simple (sans drag) reste actif pour ouvrir l'édition
+
+## 2. Filtre type dans l'inventaire
+
+L'inventaire (onglet "Inventaire") a maintenant un nouveau filtre **Type** avec 4 options :
+- **Tout** (par défaut)
+- **📦 Boîtes** seulement
+- **🖼 Cadres** seulement
+- **🪑 Meubles** seulement
+
+Chaque ligne de l'inventaire affiche désormais aussi :
+- Une **icône kind** au début (📦/🖼/🪑)
+- Pour les cadres, l'icône varie selon le type (🎨 tableau, 📷 photo, 📜 poster, 🪞 miroir, 🖼 autre)
+- Un **badge ⚠** orange pour les cadres fragiles
+- Le compteur en haut s'adapte ("3 cadres" au lieu de "3 boîtes" si filtre actif)
+
+## 3. Suppression colonne `flatEdge` legacy
+
+La colonne deprecated `flatEdge` (`"N"|"S"|"E"|"W"` de l'ancienne version) est supprimée de la base. Cleanup propre.
+
+## Note sur la 3D des cadres
+
+J'ai laissé la **vue 3D des cadres** pour plus tard. La 3D actuelle utilise des polygones SVG iso et je n'ai pas pu vérifier la version exacte de ton `MapGrid3D.tsx` actuel. Si tu veux qu'on s'y attaque, à la prochaine session envoie-moi le fichier et je l'adapte.
 
 ## Fichiers du patch
 
-**2 fichiers à copier tels quels** (nouveaux ou à remplacer) :
-
 ```
-src/app/api/bootstrap/route.ts          ← remplacé (ne crée plus de lieu auto)
-src/app/onboarding/page.tsx             ← NOUVEAU (écran d'accueil)
-```
+prisma/migrations/20260427100000_drop_legacy_flat_edge/migration.sql   ← NOUVEAU (DROP COLUMN)
+prisma/schema.prisma                                                   ← remplacé (retire flatEdge)
 
-**1 fichier à modifier manuellement** : `src/app/page.tsx`
-
-## Installation — étape 1 : copier les fichiers
-
-Via l'Explorateur Windows :
-1. Décompresse ce zip
-2. Copie `src/app/api/bootstrap/route.ts` par-dessus l'existant
-3. Copie le dossier entier `src/app/onboarding/` dans ton projet (le dossier n'existe pas encore)
-
-## Installation — étape 2 : modifier page.tsx
-
-Ouvre `src/app/page.tsx` dans VS Code.
-
-**Cherche ce bloc** (il est vers la ligne 80-95) :
-
-```tsx
-  // Bootstrap: on first login the user has no locations yet; ask the server
-  // to create a starter plan. Idempotent, so safe to call on every mount.
-  useEffect(() => {
-    fetch("/api/bootstrap", { method: "POST" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (data?.created) {
-          // Refresh to show the new plan
-          refresh();
-        }
-      })
-      .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+src/app/page.tsx                                                       ← handleFlatDrop ajouté
+src/components/MapGrid.tsx                                             ← drag & drop des barres
+src/components/InventoryList.tsx                                       ← filtre kind + icônes
 ```
 
-**Remplace-le par** :
+## Installation
 
-```tsx
-  // On first mount: check if the user has any place. If not, redirect to
-  // /onboarding where they'll choose a preset and name their first place.
-  const router = useRouter();
-  useEffect(() => {
-    fetch("/api/bootstrap", { method: "POST" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (data && !data.hasPlaces) {
-          router.replace("/onboarding");
-        }
-      })
-      .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-```
+### 1. Copier les fichiers
 
-**Et en haut du fichier**, trouve la ligne :
+Via l'Explorateur Windows : décompresse, copie `src/` et `prisma/` par-dessus, accepte de remplacer.
 
-```tsx
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-```
-
-Juste en dessous, ajoute :
-
-```tsx
-import { useRouter } from "next/navigation";
-```
-
-## Test
+### 2. Migration Prisma
 
 ```powershell
+cd C:\Users\Utilisateur\Downloads\storage-box-app\storage-box-app
+npx prisma migrate deploy
+npx prisma generate
+```
+
+La migration supprime juste la vieille colonne `flatEdge`. Aucun risque.
+
+### 3. Restart serveur
+
+```powershell
+# Ctrl+C dans la fenêtre où tourne npm run dev
 npm run dev
 ```
 
-Pour **tester le flow onboarding** :
-1. Crée un nouveau compte de test (ou va sur Neon et supprime un User + ses Place pour un compte test)
-2. Connecte-toi → tu dois être redirigé vers `/onboarding`
-3. L'écran doit afficher : "Bienvenue - Configurons votre premier espace"
-4. Remplis un nom + choisis un preset → bouton "Commencer →"
-5. Tu arrives sur l'app normale avec ton lieu créé
+### 4. Tests
 
-Pour **tester que les utilisateurs existants ne sont pas embêtés** :
-1. Avec ton compte actuel (qui a déjà des lieux), va sur `/` → ça marche normalement
-2. Essaye d'aller manuellement sur `/onboarding` → tu dois être redirigé vers `/`
+**Drag & drop cadres** :
+1. Vue plan, ne sois pas en mode édition
+2. Survole un cadre → tooltip dit "glisser pour déplacer"
+3. Clique-maintiens, déplace → barre devient pâle, arêtes deviennent bleu clair
+4. Survole une autre arête → elle devient orange
+5. Lâche → toast "Cadre déplacé", la barre apparaît au nouvel endroit
+
+**Filtre inventaire** :
+1. Onglet "Inventaire" → "Filtres"
+2. Nouvelle section "Type" avec 4 boutons
+3. Clique "🖼 Cadres" → seuls les cadres restent visibles, compteur "X / Y cadres"
+4. Vérifie que les cadres ont leur icône (🎨 si tableau, 📷 si photo, etc.)
 
 ## Commit
 
 ```powershell
-git add src/app/api/bootstrap/route.ts src/app/onboarding/page.tsx src/app/page.tsx
-git commit -m "feat: onboarding explicite pour nouveaux utilisateurs"
+git add prisma src/app src/components
+git commit -m "improvements: drag & drop cadres entre arêtes + filtre type inventaire + drop colonne legacy"
 git push
 ```
 
-## Notes
+Vercel applique la migration et redéploie automatiquement.
 
-- L'onboarding n'est **pas obligatoire** au sens où l'utilisateur pourrait techniquement fermer son navigateur et revenir. Mais tant qu'il n'a aucun lieu, il sera toujours renvoyé sur `/onboarding` à chaque login. Donc en pratique c'est un passage quasi-obligé.
-- Si un utilisateur supprime TOUS ses lieux un jour, il sera aussi renvoyé vers `/onboarding`. C'est logique : sans lieu, rien à afficher.
-- Les utilisateurs invités à un lieu par quelqu'un d'autre **ne passent pas** par l'onboarding (leur `sharedCount > 0` fait que `hasPlaces = true`). Logique aussi : ils ont déjà où aller.
+## Limitations
+
+- **Drag & drop sur mobile** : le drag HTML5 natif est limité sur mobile. Sur tablette ça peut marcher avec un long-press.
+- **Pas de drag des cadres entre lieux** : un cadre reste dans son `placeId`. Le drag déplace seulement entre arêtes du même lieu.
+- **3D des cadres** : pas encore. Voir note ci-dessus.

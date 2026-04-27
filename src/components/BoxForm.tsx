@@ -58,6 +58,11 @@ export default function BoxForm({
   const [locationCode, setLocationCode] = useState<string>(
     presetLocationCode ?? ""
   );
+
+  // Sync location when the user clicks a different cell while the form is open
+  useEffect(() => {
+    if (presetLocationCode) setLocationCode(presetLocationCode);
+  }, [presetLocationCode]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [hydrated, setHydrated] = useState(mode.kind === "create");

@@ -26,7 +26,7 @@ import ViewToggle, {
   type ViewMode,
 } from "@/components/ViewToggle";
 import CrossSection from "@/components/CrossSection";
-import WelcomeGuide from "@/components/WelcomeGuide";
+import TutorialOverlay from "@/components/TutorialOverlay";
 import type { CellView, FlatEdgeItem } from "@/lib/types";
 
 type BoxWithLoc = {
@@ -513,7 +513,9 @@ export default function HomePage() {
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-            <PlaceSwitcher />
+            <div data-tutorial="lieu">
+              <PlaceSwitcher />
+            </div>
             {/* Stats — hidden on small screens to keep header compact */}
             <div className="hidden sm:flex items-center gap-2">
               <StatPill label="Cellules" value={stats.occupiedCells} sub={`/${stats.occupiedCells + stats.freeCells}`} tone="safety" />
@@ -554,12 +556,16 @@ export default function HomePage() {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-5">
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-3 items-start">
-          <SearchBar
-            onSelectResult={handleSearchSelect}
-            onResultsChange={setHighlighted}
-          />
-          <div className="flex items-center gap-2 flex-wrap">
-            <TabSwitch current={tab} onChange={(t) => { setTab(t); setSplitView(false); }} />
+          <div data-tutorial="recherche">
+            <SearchBar
+              onSelectResult={handleSearchSelect}
+              onResultsChange={setHighlighted}
+            />
+          </div>
+          <div data-tutorial="toolbar" className="flex items-center gap-2 flex-wrap">
+            <div data-tutorial="inventaire" className="inline-flex">
+              <TabSwitch current={tab} onChange={(t) => { setTab(t); setSplitView(false); }} />
+            </div>
             {/* Desktop-only controls */}
             <button
               onClick={() => setSplitView((v) => !v)}
@@ -677,7 +683,7 @@ export default function HomePage() {
             ) : (
               <>
                 {/* Map pane — hidden via CSS when on inventory tab and not in split view */}
-                <div className={clsx("space-y-5", !splitView && tab !== "map" && "hidden")}>
+                <div data-tutorial="plan" className={clsx("space-y-5", !splitView && tab !== "map" && "hidden")}>
                   {viewMode === "2d" ? (
                     <MapGrid
                       cells={cells}
@@ -830,7 +836,7 @@ export default function HomePage() {
       </footer>
 
       <Toasts toasts={toasts} onDismiss={dismissToast} />
-      <WelcomeGuide forceOpen={showGuide} onClose={() => setShowGuide(false)} />
+      <TutorialOverlay forceOpen={showGuide} onClose={() => setShowGuide(false)} />
     </main>
   );
 }

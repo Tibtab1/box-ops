@@ -823,10 +823,19 @@ function ExportMenu({
             href="/stock"
             target="_blank"
             rel="noopener"
-            className="block px-3 py-2 font-mono text-[11px] uppercase tracking-widest text-ink hover:bg-paper-dark"
+            className="block px-3 py-2 font-mono text-[11px] uppercase tracking-widest text-ink hover:bg-paper-dark border-b-2 border-dashed border-ink/15"
             onMouseDown={(e) => e.preventDefault()}
           >
             📦 Inventaire stock (SKU)
+          </a>
+          <a
+            href="/activity"
+            target="_blank"
+            rel="noopener"
+            className="block px-3 py-2 font-mono text-[11px] uppercase tracking-widest text-ink hover:bg-paper-dark"
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            📋 Historique activité
           </a>
         </div>
       )}

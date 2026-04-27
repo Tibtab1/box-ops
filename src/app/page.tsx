@@ -26,6 +26,7 @@ import ViewToggle, {
   type ViewMode,
 } from "@/components/ViewToggle";
 import CrossSection from "@/components/CrossSection";
+import WelcomeGuide from "@/components/WelcomeGuide";
 import type { CellView, FlatEdgeItem } from "@/lib/types";
 
 type BoxWithLoc = {
@@ -55,6 +56,7 @@ type RightPanel =
 
 export default function HomePage() {
   const router = useRouter();
+  const [showGuide, setShowGuide] = useState(false);
   const [cells, setCells] = useState<CellView[]>([]);
   const [boxes, setBoxes] = useState<BoxWithLoc[]>([]);
   const [flats, setFlats] = useState<FlatEdgeItem[]>([]);
@@ -535,6 +537,14 @@ export default function HomePage() {
                 activeRole === null
               }
             />
+            <button
+              onClick={() => setShowGuide(true)}
+              className="w-9 h-9 border-2 border-ink shadow-stamp bg-paper grid place-items-center font-mono text-sm font-bold text-ink hover:-translate-y-0.5 hover:shadow-stamp-lg transition-transform"
+              title="Guide d'utilisation"
+              aria-label="Guide d'utilisation"
+            >
+              ?
+            </button>
             <NotificationBell />
             <ThemeToggle />
             <UserMenu />
@@ -820,6 +830,7 @@ export default function HomePage() {
       </footer>
 
       <Toasts toasts={toasts} onDismiss={dismissToast} />
+      <WelcomeGuide forceOpen={showGuide} onClose={() => setShowGuide(false)} />
     </main>
   );
 }

@@ -166,7 +166,6 @@ model Box {
   flatType            String?               // "painting" | "photo" | "poster" | "mirror" | "other"
   isFragile           Boolean  @default(false)
   estimatedValueCents Int?                  // value in cents (e.g. 12500 = 125,00 €)
-  flatEdge            String?               // DEPRECATED legacy column ("N"|"S"|"E"|"W"), kept for safety
   // v2 flat positioning: a flat is an edge between two cells (or a cell and outer space)
   flatEdgeRowA        Int?
   flatEdgeColA        Int?

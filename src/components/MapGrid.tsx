@@ -27,6 +27,11 @@ type Props = {
   ) => Promise<void>;
   onBoxDrop?: (boxId: string, targetCode: string) => Promise<void>;
   onFurnitureDrop?: (furnitureId: string, targetCode: string) => Promise<void>;
+  /** Move an existing flat to a new edge (drag & drop between edges). */
+  onFlatDrop?: (
+    flatId: string,
+    edge: { rowA: number; colA: number; rowB: number | null; colB: number | null }
+  ) => Promise<void>;
   dragEnabled?: boolean;
 };
 
@@ -54,6 +59,7 @@ export default function MapGrid({
   onRowMutate,
   onBoxDrop,
   onFurnitureDrop,
+  onFlatDrop,
   dragEnabled,
 }: Props) {
   const {
@@ -113,9 +119,11 @@ export default function MapGrid({
   const [dragged, setDragged] = useState<
     | { kind: "box"; id: string; fromCode: string }
     | { kind: "furniture"; id: string; fromCode: string }
+    | { kind: "flat"; id: string }
     | null
   >(null);
   const [dragOverCode, setDragOverCode] = useState<string | null>(null);
+  const [dragOverEdgeKey, setDragOverEdgeKey] = useState<string | null>(null);
 
   async function mutate(
     row: number,
@@ -297,6 +305,16 @@ export default function MapGrid({
             editMode={!!editMode}
             onEdgeClick={onEdgeClick}
             onFlatClick={onFlatClick}
+            dragEnabled={!!dragEnabled}
+            draggedFlatId={dragged?.kind === "flat" ? dragged.id : null}
+            onFlatDragStart={(id) => setDragged({ kind: "flat", id })}
+            onFlatDragEnd={() => {
+              setDragged(null);
+              setDragOverEdgeKey(null);
+            }}
+            dragOverEdgeKey={dragOverEdgeKey}
+            setDragOverEdgeKey={setDragOverEdgeKey}
+            onFlatDrop={onFlatDrop}
           />
         </div>
       </div>
@@ -322,11 +340,26 @@ function EdgeOverlay(props: {
   editMode: boolean;
   onEdgeClick?: (edge: { rowA: number; colA: number; rowB: number | null; colB: number | null }) => void;
   onFlatClick?: (flatId: string) => void;
+  /** Drag & drop: when a flat bar is being dragged, all edges become drop targets. */
+  dragEnabled: boolean;
+  draggedFlatId: string | null;
+  onFlatDragStart: (flatId: string) => void;
+  onFlatDragEnd: () => void;
+  dragOverEdgeKey: string | null;
+  setDragOverEdgeKey: (k: string | null) => void;
+  onFlatDrop?: (
+    flatId: string,
+    edge: { rowA: number; colA: number; rowB: number | null; colB: number | null }
+  ) => Promise<void>;
 }) {
   const {
     rowsList, globalMinCol, totalCols, cellByCode,
     flats, placingFlat, editMode, onEdgeClick, onFlatClick,
+    dragEnabled, draggedFlatId, onFlatDragStart, onFlatDragEnd,
+    dragOverEdgeKey, setDragOverEdgeKey, onFlatDrop,
   } = props;
+
+  const isDraggingFlat = draggedFlatId !== null;
 
   if (rowsList.length === 0) return null;
 
@@ -459,8 +492,8 @@ function EdgeOverlay(props: {
 
   return (
     <div style={overlayStyle}>
-      {/* Hotspots: only when in placing mode */}
-      {placingFlat && candidates.map((e, idx) => {
+      {/* Hotspots: shown when in placing mode OR when a flat is being dragged */}
+      {(placingFlat || isDraggingFlat) && candidates.map((e, idx) => {
         const a = cellCenter(e.rowA, e.colA);
         const isHorizontal = e.orientation === "horizontal";
         // For outer edges, offset position to be "outside" the cell
@@ -480,29 +513,9 @@ function EdgeOverlay(props: {
             height = CELL_PX - 8;
           }
         } else {
-          // Outer edge: place along the cell's outer boundary
-          // For outer horizontal: top or bottom; we don't know which, so
-          // we render only the south outer edges (already in candidates) for now
-          // — the north-only ones are added explicitly below.
-          // Determine if it's north (above cell) or below: we use a heuristic
-          // from the orientation list: horizontal candidates with rowB=null
-          // can be either north or south. Let's treat them all as "south"
-          // for cells whose south neighbor is missing, otherwise as north.
-          // Actually: the candidate generation above already has duplicates
-          // possible (south outer + north outer for top row). Let's just
-          // detect from cellAt:
           if (isHorizontal) {
-            // Check: does cell have a north neighbor?
             const north = cellAt(e.rowA - 1, e.colA);
             const south = cellAt(e.rowA + 1, e.colA);
-            // If candidate was added from "no south" → south outer
-            // If added from "no north" → north outer
-            // We can't distinguish in this loop without state, so just place:
-            //   - if no south → bottom of cell
-            //   - if no north and we already placed south, place north
-            // To keep it simple: place an outer edge only on the side where
-            // there's no neighbor. If both missing, render two (already in
-            // candidates).
             if (!south) {
               y = a.y + CELL_PX / 2;
             } else if (!north) {
@@ -522,27 +535,64 @@ function EdgeOverlay(props: {
             height = CELL_PX - 8;
           }
         }
+        // Stable key for this candidate edge (matches edgeKey() in lib)
+        const candKey =
+          e.rowB !== null && e.colB !== null
+            ? (() => {
+                const a1 = `${e.rowA}-${e.colA}`;
+                const b1 = `${e.rowB}-${e.colB}`;
+                return a1 < b1 ? `${a1}|${b1}` : `${b1}|${a1}`;
+              })()
+            : `${e.rowA}-${e.colA}-OUT-${e.orientation}`;
+        const isHere = dragOverEdgeKey === candKey;
         return (
           <button
             key={`hot-${idx}-${e.rowA}-${e.colA}-${e.rowB}-${e.colB}-${e.orientation}`}
             type="button"
             onClick={(ev) => {
+              if (isDraggingFlat) return; // don't click while dragging
               ev.stopPropagation();
               onEdgeClick?.({
                 rowA: e.rowA, colA: e.colA,
                 rowB: e.rowB, colB: e.colB,
               });
             }}
-            className="absolute pointer-events-auto bg-blueprint/0 hover:bg-blueprint/40 border border-blueprint/0 hover:border-blueprint transition-colors"
+            onDragOver={(ev) => {
+              if (!isDraggingFlat) return;
+              ev.preventDefault();
+              ev.dataTransfer.dropEffect = "move";
+              if (dragOverEdgeKey !== candKey) setDragOverEdgeKey(candKey);
+            }}
+            onDragLeave={() => {
+              if (dragOverEdgeKey === candKey) setDragOverEdgeKey(null);
+            }}
+            onDrop={async (ev) => {
+              if (!isDraggingFlat || !draggedFlatId) return;
+              ev.preventDefault();
+              setDragOverEdgeKey(null);
+              await onFlatDrop?.(draggedFlatId, {
+                rowA: e.rowA, colA: e.colA,
+                rowB: e.rowB, colB: e.colB,
+              });
+              onFlatDragEnd();
+            }}
+            className={clsx(
+              "absolute pointer-events-auto border transition-colors",
+              isHere
+                ? "bg-safety/60 border-safety"
+                : isDraggingFlat
+                ? "bg-blueprint/20 hover:bg-blueprint/50 border-blueprint/40 hover:border-blueprint"
+                : "bg-blueprint/0 hover:bg-blueprint/40 border-blueprint/0 hover:border-blueprint"
+            )}
             style={{
               left: x - width / 2,
               top: y - height / 2,
               width,
               height,
-              cursor: "pointer",
+              cursor: isDraggingFlat ? "copy" : "pointer",
               borderRadius: 2,
             }}
-            title="Cliquer pour poser un cadre ici"
+            title={isDraggingFlat ? "Lâcher pour déplacer le cadre ici" : "Cliquer pour poser un cadre ici"}
           />
         );
       })}
@@ -610,23 +660,42 @@ function EdgeOverlay(props: {
               height: CELL_PX - 16,
             };
 
+        const isBeingDragged = draggedFlatId === f.id;
+        const canDrag = dragEnabled && !placingFlat;
         return (
           <button
             key={f.id}
             type="button"
+            draggable={canDrag}
+            onDragStart={(ev) => {
+              if (!canDrag) return;
+              ev.dataTransfer.effectAllowed = "move";
+              ev.dataTransfer.setData("text/boxops-flat-id", f.id);
+              onFlatDragStart(f.id);
+            }}
+            onDragEnd={() => {
+              onFlatDragEnd();
+            }}
             onClick={(ev) => {
               ev.stopPropagation();
               onFlatClick?.(f.id);
             }}
-            className="absolute pointer-events-auto border border-black/40 hover:scale-y-150 hover:scale-x-150 transition-transform"
+            className={clsx(
+              "absolute pointer-events-auto border border-black/40 transition-transform",
+              isBeingDragged ? "opacity-30" : "hover:scale-y-150 hover:scale-x-150"
+            )}
             style={{
               ...barStyle,
               backgroundColor: f.color || "#e8602c",
               boxShadow: "0 0 4px rgba(0,0,0,0.6)",
               borderRadius: 1,
-              cursor: "pointer",
+              cursor: canDrag ? "grab" : "pointer",
             }}
-            title={`🖼 ${f.name}${f.isFragile ? " (fragile)" : ""}`}
+            title={
+              canDrag
+                ? `🖼 ${f.name}${f.isFragile ? " (fragile)" : ""} — clic pour éditer · glisser pour déplacer`
+                : `🖼 ${f.name}${f.isFragile ? " (fragile)" : ""}`
+            }
           />
         );
       })}

@@ -383,6 +383,33 @@ export default function HomePage() {
     [refresh, pushToast]
   );
 
+  // v14: move an existing flat to a different edge (drag & drop)
+  const handleFlatDrop = useCallback(
+    async (
+      flatId: string,
+      edge: { rowA: number; colA: number; rowB: number | null; colB: number | null }
+    ) => {
+      const res = await fetch(`/api/boxes/${flatId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          flatEdgeRowA: edge.rowA,
+          flatEdgeColA: edge.colA,
+          flatEdgeRowB: edge.rowB,
+          flatEdgeColB: edge.colB,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        pushToast("error", data.error ?? "Déplacement du cadre impossible.");
+        return;
+      }
+      pushToast("success", "Cadre déplacé");
+      await refresh();
+    },
+    [refresh, pushToast]
+  );
+
   // v13: open the inner view of a furniture on click
   const handleFurnitureClick = useCallback((furnitureId: string) => {
     setRightPanel({ kind: "furniture-detail", boxId: furnitureId });
@@ -595,6 +622,7 @@ export default function HomePage() {
                     onRowMutate={editMode ? handleRowMutate : undefined}
                     onBoxDrop={handleBoxDrop}
                     onFurnitureDrop={handleFurnitureDrop}
+                    onFlatDrop={handleFlatDrop}
                     dragEnabled={
                       !editMode &&
                       !placementMode &&

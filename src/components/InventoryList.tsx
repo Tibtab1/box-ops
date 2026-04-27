@@ -10,10 +10,14 @@ type BoxRow = {
   tags: string[];
   location: { code: string; row: number; col: number } | null;
   updatedAt: string;
+  kind?: "box" | "furniture" | "flat";
+  flatType?: "painting" | "photo" | "poster" | "mirror" | "other" | null;
+  isFragile?: boolean;
 };
 
 type SortMode = "recent" | "alpha" | "location";
 type PlacementFilter = "all" | "placed" | "unplaced";
+type KindFilter = "all" | "box" | "flat" | "furniture";
 
 type Props = {
   boxes: BoxRow[];
@@ -25,6 +29,7 @@ export default function InventoryList({ boxes, onOpenBox }: Props) {
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [selectedColor, setSelectedColor] = useState<string | null>(null);
   const [placement, setPlacement] = useState<PlacementFilter>("all");
+  const [kindFilter, setKindFilter] = useState<KindFilter>("all");
   const [sort, setSort] = useState<SortMode>("recent");
   const [showFilters, setShowFilters] = useState(false);
 
@@ -50,6 +55,10 @@ export default function InventoryList({ boxes, onOpenBox }: Props) {
     let rows = boxes.filter((b) => {
       if (placement === "placed" && !b.location) return false;
       if (placement === "unplaced" && b.location) return false;
+      if (kindFilter !== "all") {
+        const k = b.kind ?? "box";
+        if (k !== kindFilter) return false;
+      }
       if (selectedColor && b.color !== selectedColor) return false;
       if (selectedTags.size > 0) {
         for (const t of selectedTags) if (!b.tags.includes(t)) return false;
@@ -81,7 +90,7 @@ export default function InventoryList({ boxes, onOpenBox }: Props) {
       );
     }
     return rows;
-  }, [boxes, query, placement, selectedColor, selectedTags, sort]);
+  }, [boxes, query, placement, kindFilter, selectedColor, selectedTags, sort]);
 
   const activeFilterCount =
     (selectedTags.size > 0 ? 1 : 0) +
@@ -113,7 +122,7 @@ export default function InventoryList({ boxes, onOpenBox }: Props) {
           <h2 className="font-display text-2xl font-black text-ink leading-tight">
             {filtered.length}{" "}
             <span className="text-ink/50 font-normal text-lg">
-              / {boxes.length} boîtes
+              / {boxes.length} {kindFilter === "flat" ? "cadres" : kindFilter === "furniture" ? "meubles" : kindFilter === "box" ? "boîtes" : "éléments"}
             </span>
           </h2>
         </div>
@@ -173,6 +182,36 @@ export default function InventoryList({ boxes, onOpenBox }: Props) {
                   className={clsx(
                     "font-mono text-[10px] uppercase tracking-widest px-2 py-1 border-2 transition-all",
                     placement === k
+                      ? "bg-ink text-paper border-ink"
+                      : "border-ink/30 text-ink/70 hover:border-ink"
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Kind filter (box / flat / furniture) */}
+          <div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink/70 mb-1.5">
+              Type
+            </div>
+            <div className="flex gap-1.5 flex-wrap">
+              {(
+                [
+                  ["all", "Tout"],
+                  ["box", "📦 Boîtes"],
+                  ["flat", "🖼 Cadres"],
+                  ["furniture", "🪑 Meubles"],
+                ] as const
+              ).map(([k, label]) => (
+                <button
+                  key={k}
+                  onClick={() => setKindFilter(k)}
+                  className={clsx(
+                    "font-mono text-[10px] uppercase tracking-widest px-2 py-1 border-2 transition-all",
+                    kindFilter === k
                       ? "bg-ink text-paper border-ink"
                       : "border-ink/30 text-ink/70 hover:border-ink"
                   )}
@@ -275,9 +314,32 @@ export default function InventoryList({ boxes, onOpenBox }: Props) {
                 >
                   {b.location?.code ?? "·"}
                 </span>
+                <span className="text-base shrink-0" aria-hidden>
+                  {b.kind === "flat"
+                    ? b.flatType === "painting"
+                      ? "🎨"
+                      : b.flatType === "photo"
+                      ? "📷"
+                      : b.flatType === "poster"
+                      ? "📜"
+                      : b.flatType === "mirror"
+                      ? "🪞"
+                      : "🖼"
+                    : b.kind === "furniture"
+                    ? "🪑"
+                    : "📦"}
+                </span>
                 <span className="font-display font-bold text-paper flex-1 truncate">
                   {b.name}
                 </span>
+                {b.kind === "flat" && b.isFragile && (
+                  <span
+                    className="font-mono text-[8px] uppercase tracking-widest text-paper bg-safety/80 px-1 py-0.5 border border-paper/40 shrink-0"
+                    title="Fragile"
+                  >
+                    ⚠
+                  </span>
+                )}
                 {b.tags.length > 0 && (
                   <span className="font-mono text-[9px] text-paper/80 truncate shrink-0 max-w-[40%]">
                     {b.tags.slice(0, 3).map((t) => `#${t}`).join(" ")}

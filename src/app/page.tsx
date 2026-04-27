@@ -635,6 +635,7 @@ export default function HomePage() {
                 ) : (
                   <MapGrid3D
                     cells={cells}
+                    flats={flats}
                     selectedCode={focusedCode}
                     highlightedCodes={highlighted}
                     onCellClick={handleCellClick}

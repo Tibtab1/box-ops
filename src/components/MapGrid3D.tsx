@@ -11,10 +11,11 @@ import {
   shadeHex,
   renderDepth,
 } from "@/lib/iso";
-import type { CellView } from "@/lib/types";
+import type { CellView, FlatEdgeItem } from "@/lib/types";
 
 type Props = {
   cells: CellView[];
+  flats?: FlatEdgeItem[];
   selectedCode?: string | null;
   highlightedCodes?: Set<string>;
   onCellClick?: (cell: CellView) => void;
@@ -39,6 +40,7 @@ type HoverInfo = {
 
 export default function MapGrid3D({
   cells,
+  flats = [],
   selectedCode,
   highlightedCodes,
   onCellClick,
@@ -220,7 +222,14 @@ export default function MapGrid3D({
     zBottom: number;
     zTop: number;
   };
-  type Item = FloorTile | BoxTile;
+  type FlatTile = { kind: "flat"; flat: FlatEdgeItem; depth: number };
+  type Item = FloorTile | BoxTile | FlatTile;
+
+  // Set of "row,col" for visible cells — used by FlatSlab to resolve outer edges.
+  const cellSet = useMemo(
+    () => new Set(visibleCells.map((c) => `${c.row},${c.col}`)),
+    [visibleCells]
+  );
 
   const items: Item[] = useMemo(() => {
     const acc: Item[] = [];
@@ -246,8 +255,21 @@ export default function MapGrid3D({
         });
       }
     }
+
+    for (const f of flats) {
+      // Depth: use the "foreground" boundary of the edge so the slab renders
+      // after both adjacent floor tiles but before boxes above floor level.
+      const depth =
+        (Math.max(f.colA, f.colB ?? f.colA) +
+          Math.max(f.rowA, f.rowB ?? f.rowA) +
+          1) *
+          1000 -
+        0.5;
+      acc.push({ kind: "flat", flat: f, depth });
+    }
+
     return acc.sort((a, b) => a.depth - b.depth);
-  }, [visibleCells, explode]);
+  }, [visibleCells, explode, flats]);
 
   // ─── Empty state ──────────────────────────────────────────────────
   if (cells.length === 0) {
@@ -426,6 +448,15 @@ export default function MapGrid3D({
                   clickable={
                     !!onCellClick && (!readOnly || item.cell.boxes.length > 0)
                   }
+                />
+              );
+            }
+            if (item.kind === "flat") {
+              return (
+                <FlatSlab
+                  key={`flat-${item.flat.id}`}
+                  flat={item.flat}
+                  cellSet={cellSet}
                 />
               );
             }
@@ -789,6 +820,96 @@ function BoxCube({
       )}
     </g>
   );
+}
+
+// ─── FlatSlab ────────────────────────────────────────────────────────
+// Renders a cadre (kind:"flat") as a thin vertical panel standing on an edge.
+function FlatSlab({
+  flat,
+  cellSet,
+}: {
+  flat: FlatEdgeItem;
+  cellSet: Set<string>;
+}) {
+  const SLAB_H = 0.65; // height in stack units
+  const zOff = flat.stackIndex * 0.08; // slight z-lift for multiple flats on same edge
+
+  const { rowA, colA, rowB, colB, color, name } = flat;
+
+  let pts: [number, number][];
+
+  if (rowB !== null && colB !== null) {
+    if (rowA === rowB) {
+      // Same row → vertical boundary between two horizontally adjacent cells
+      const edgeCol = Math.min(colA, colB) + 1;
+      pts = slabPts(edgeCol, rowA, edgeCol, rowA + 1, zOff, SLAB_H + zOff);
+    } else {
+      // Same col → horizontal boundary between two vertically adjacent cells
+      const edgeRow = Math.min(rowA, rowB) + 1;
+      pts = slabPts(colA, edgeRow, colA + 1, edgeRow, zOff, SLAB_H + zOff);
+    }
+  } else {
+    // Outer edge: infer which side lacks a neighbor
+    const hasE = cellSet.has(`${rowA},${colA + 1}`);
+    const hasW = cellSet.has(`${rowA},${colA - 1}`);
+    const hasS = cellSet.has(`${rowA + 1},${colA}`);
+
+    if (!hasE || !hasW) {
+      const edgeCol = !hasE ? colA + 1 : colA;
+      pts = slabPts(edgeCol, rowA, edgeCol, rowA + 1, zOff, SLAB_H + zOff);
+    } else {
+      const edgeRow = !hasS ? rowA + 1 : rowA;
+      pts = slabPts(colA, edgeRow, colA + 1, edgeRow, zOff, SLAB_H + zOff);
+    }
+  }
+
+  const points = pts.map((p) => p.join(",")).join(" ");
+  const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+  const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+
+  return (
+    <g style={{ pointerEvents: "none" }}>
+      <polygon
+        points={points}
+        fill={color || "#e8602c"}
+        stroke="var(--ink)"
+        strokeWidth={1.5}
+        opacity={0.9}
+      />
+      <text
+        x={cx}
+        y={cy}
+        textAnchor="middle"
+        dominantBaseline="middle"
+        fontFamily="Fraunces, serif"
+        fontSize="7"
+        fontWeight="700"
+        fill="rgba(255,255,255,0.95)"
+        style={{ userSelect: "none" }}
+      >
+        {truncate(name, 12)}
+      </text>
+    </g>
+  );
+}
+
+/** Build the 4 projected corners of a slab on an edge defined by two grid points. */
+function slabPts(
+  x1: number, y1: number,
+  x2: number, y2: number,
+  zBot: number,
+  zTop: number
+): [number, number][] {
+  const p1 = project(x1, y1, zBot);
+  const p2 = project(x2, y2, zBot);
+  const p3 = project(x2, y2, zTop);
+  const p4 = project(x1, y1, zTop);
+  return [
+    [p1.sx, p1.sy],
+    [p2.sx, p2.sy],
+    [p3.sx, p3.sy],
+    [p4.sx, p4.sy],
+  ];
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────

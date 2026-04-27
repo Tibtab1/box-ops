@@ -58,6 +58,24 @@ SaaS de gestion d'espace de stockage personnel. Plan 2D/3D où l'utilisateur pla
 
 \- Page /stock : inventaire groupé par SKU avec totaux de quantités
 
+\- Favoris : étoile sur boîtes (BoxDetailPanel), filtre ★ dans inventaire, scroll auto
+
+\- Hauteur 3D ×1/×2/×3 : picker dans BoxForm, rendu 3D FurniturePrism echelle heightFactor
+
+\- Rayon X : toggle opacité meubles en vue 3D (toggle ✦ dans MapGrid3D)
+
+\- Rotation meuble : bouton ↻ dans BoxDetailPanel (swap spanW/spanH via PATCH)
+
+\- Vue partagée (split view) : plan + inventaire côte-à-côte, bouton ⊞
+
+\- 3D→inventaire : clic boîte en vue 3D surligne l'élément dans l'inventaire
+
+\- Suggestions tags : autocomplete dans BoxForm (prop allTags depuis page.tsx)
+
+\- UI optimiste : handleBoxDrop met à jour cells local avant retour API
+
+\- /api/activity : flux d'événements (moves + PlanLog) pour historique du plan
+
 
 
 \## Modèle cadres (kind: "flat") — important
@@ -118,7 +136,7 @@ API /api/locations retourne { cells, flats } (objet, pas array)
 
 \- Drag \& drop cadres entre lieux différents
 
-\- Vue inventaire à côté du plan (split view)
+\- Page /activity : vue historique des événements (PlanLog + moves)
 
 \- Export PDF du plan complet pour assurance
 

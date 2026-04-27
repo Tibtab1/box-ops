@@ -3,6 +3,7 @@
 import { useSession, signOut } from "next-auth/react";
 import { useState } from "react";
 import clsx from "clsx";
+import Link from "next/link";
 
 export default function UserMenu() {
   const { data: session, status } = useSession();
@@ -56,9 +57,32 @@ export default function UserMenu() {
               e.preventDefault();
               signOut({ callbackUrl: "/login" });
             }}
-            className="w-full text-left px-3 py-2 font-mono text-[11px] uppercase tracking-widest text-ink hover:bg-paper-dark"
+            className="w-full text-left px-3 py-2 font-mono text-[11px] uppercase tracking-widest text-ink hover:bg-paper-dark border-b-2 border-dashed border-ink/15"
           >
             ⏻ Se déconnecter
+          </button>
+          <Link
+            href="/forgot-password"
+            className="block px-3 py-2 font-mono text-[11px] uppercase tracking-widest text-ink hover:bg-paper-dark border-b-2 border-dashed border-ink/15"
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            🔑 Changer de mot de passe
+          </Link>
+          <button
+            onMouseDown={async (e) => {
+              e.preventDefault();
+              if (
+                !confirm(
+                  "Supprimer définitivement votre compte et toutes vos données (lieux, boîtes, plans) ? Cette action est irréversible."
+                )
+              )
+                return;
+              await fetch("/api/account", { method: "DELETE" });
+              signOut({ callbackUrl: "/login" });
+            }}
+            className="w-full text-left px-3 py-2 font-mono text-[11px] uppercase tracking-widest text-safety hover:bg-safety/10"
+          >
+            ✕ Supprimer mon compte
           </button>
         </div>
       )}

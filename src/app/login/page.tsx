@@ -161,6 +161,16 @@ function LoginContent() {
                 ? "Se connecter"
                 : "Créer le compte"}
             </button>
+            {mode === "signin" && (
+              <div className="text-right">
+                <a
+                  href="/forgot-password"
+                  className="font-mono text-[10px] uppercase tracking-widest text-ink/50 hover:text-ink transition-colors"
+                >
+                  Mot de passe oublié ?
+                </a>
+              </div>
+            )}
           </form>
 
           <div className="flex items-center gap-3">

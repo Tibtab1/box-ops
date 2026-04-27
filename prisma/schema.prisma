@@ -25,9 +25,10 @@ model User {
   createdInvites  PlaceInvitation[] @relation("InviteCreator")
   locations       Location[]
   boxes           Box[]
-  undoEntries     UndoEntry[]
-  planLogs        PlanLog[]
-  comments        Comment[]
+  undoEntries          UndoEntry[]
+  planLogs             PlanLog[]
+  comments             Comment[]
+  passwordResetTokens  PasswordResetToken[]
   createdAt       DateTime  @default(now())
 }
 
@@ -199,6 +200,15 @@ model PlanLog {
   place     Place    @relation(fields: [placeId], references: [id], onDelete: Cascade)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   @@index([placeId, createdAt])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Comment {

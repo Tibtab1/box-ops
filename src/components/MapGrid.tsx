@@ -712,11 +712,13 @@ function CellOrFurniture(props: {
   dragged:
     | { kind: "box"; id: string; fromCode: string }
     | { kind: "furniture"; id: string; fromCode: string }
+    | { kind: "flat"; id: string }
     | null;
   setDragged: (
     v:
       | { kind: "box"; id: string; fromCode: string }
       | { kind: "furniture"; id: string; fromCode: string }
+      | { kind: "flat"; id: string }
       | null
   ) => void;
   dragOverCode: string | null;

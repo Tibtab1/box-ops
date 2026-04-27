@@ -22,12 +22,87 @@ export type BoxDTO = {
   locationId: string | null;
   stackIndex: number;
   location: LocationDTO | null;
-  kind: "box" | "furniture";
+  kind: "box" | "furniture" | "flat";
   spanW: number;
   spanH: number;
   parentId: string | null;
+  // Flat-specific (only meaningful when kind === "flat")
+  widthCm: number | null;
+  heightCm: number | null;
+  flatType: FlatType | null;
+  isFragile: boolean;
+  estimatedValueCents: number | null;
+  flatEdgeRowA: number | null;
+  flatEdgeColA: number | null;
+  flatEdgeRowB: number | null;
+  flatEdgeColB: number | null;
   createdAt: string;
   updatedAt: string;
+};
+
+/** Subtype for flat (frame/painting/poster/mirror) items */
+export type FlatType = "painting" | "photo" | "poster" | "mirror" | "other";
+
+/** A flat edge is a line between two cells (or between a cell and the outer
+ *  boundary of the plan). Identified by the two cells' coordinates.
+ *  When B coords are null, the edge is on the outer boundary of the plan. */
+export type FlatEdgeCoords = {
+  rowA: number;
+  colA: number;
+  rowB: number | null;
+  colB: number | null;
+};
+
+/** Stable string key for an edge — useful for grouping flats by edge. */
+export function edgeKey(e: FlatEdgeCoords): string {
+  // Normalize: always put the smaller (row,col) first so that (A,B) and (B,A)
+  // produce the same key.
+  if (e.rowB === null || e.colB === null) {
+    return `${e.rowA}-${e.colA}-OUT`;
+  }
+  const a = `${e.rowA}-${e.colA}`;
+  const b = `${e.rowB}-${e.colB}`;
+  return a < b ? `${a}|${b}` : `${b}|${a}`;
+}
+
+/** Whether two cells (rowA,colA) and (rowB,colB) are adjacent (share an edge). */
+export function areAdjacent(
+  rowA: number, colA: number,
+  rowB: number, colB: number
+): boolean {
+  const dr = Math.abs(rowA - rowB);
+  const dc = Math.abs(colA - colB);
+  return (dr === 1 && dc === 0) || (dr === 0 && dc === 1);
+}
+
+/** Whether an edge between (rowA,colA) and (rowB,colB) is horizontal or vertical. */
+export function edgeOrientation(
+  rowA: number, colA: number,
+  rowB: number | null, colB: number | null
+): "horizontal" | "vertical" {
+  if (rowB === null || colB === null) {
+    // Outer edge: heuristic — we don't know which side, default to horizontal
+    return "horizontal";
+  }
+  // If they're in the same row → vertical edge between them (a vertical line)
+  // If they're in the same column → horizontal edge between them (a horizontal line)
+  return rowA === rowB ? "vertical" : "horizontal";
+}
+
+export const FLAT_TYPE_LABELS: Record<FlatType, string> = {
+  painting: "Tableau",
+  photo: "Photo",
+  poster: "Poster",
+  mirror: "Miroir",
+  other: "Autre",
+};
+
+export const FLAT_TYPE_ICONS: Record<FlatType, string> = {
+  painting: "🎨",
+  photo: "📷",
+  poster: "📜",
+  mirror: "🪞",
+  other: "🖼",
 };
 
 export type CellBoxLite = {
@@ -36,9 +111,28 @@ export type CellBoxLite = {
   color: string;
   tags: string[];
   stackIndex: number;
-  kind: "box" | "furniture";
+  kind: "box" | "furniture" | "flat";
   spanW: number;
   spanH: number;
+  // Flat-specific (optional, only set when kind === "flat")
+  flatType?: FlatType | null;
+  isFragile?: boolean;
+};
+
+/** A flat (frame/painting) item with its edge coordinates, ready to be rendered.
+ *  Returned by /api/locations as a sibling of cells. */
+export type FlatEdgeItem = {
+  id: string;
+  name: string;
+  color: string;
+  tags: string[];
+  flatType: FlatType | null;
+  isFragile: boolean;
+  rowA: number;
+  colA: number;
+  rowB: number | null;
+  colB: number | null;
+  stackIndex: number;
 };
 
 export type CellView = LocationDTO & {

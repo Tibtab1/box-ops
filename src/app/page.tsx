@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import MapGrid from "@/components/MapGrid";
 import MapGrid3D from "@/components/MapGrid3D";
@@ -25,7 +24,7 @@ import ViewToggle, {
   readStoredViewMode,
   type ViewMode,
 } from "@/components/ViewToggle";
-import type { CellView } from "@/lib/types";
+import type { CellView, FlatEdgeItem } from "@/lib/types";
 
 type BoxWithLoc = {
   id: string;
@@ -51,6 +50,14 @@ type RightPanel =
 export default function HomePage() {
   const [cells, setCells] = useState<CellView[]>([]);
   const [boxes, setBoxes] = useState<BoxWithLoc[]>([]);
+  const [flats, setFlats] = useState<FlatEdgeItem[]>([]);
+  // When the user clicks "+ Ajouter Cadre", we enter "placing flat" mode:
+  // the plan shows clickable hotspots on each edge. When the user clicks an
+  // edge, we open BoxForm in flat-creation mode pre-filled with that edge.
+  const [placingFlat, setPlacingFlat] = useState<boolean>(false);
+  const [pendingFlatEdge, setPendingFlatEdge] = useState<
+    { rowA: number; colA: number; rowB: number | null; colB: number | null } | null
+  >(null);
   const [tab, setTab] = useState<Tab>("map");
   const [viewMode, setViewMode] = useState<ViewMode>("2d");
   const [editMode, setEditMode] = useState(false);
@@ -82,15 +89,15 @@ export default function HomePage() {
     setViewMode(readStoredViewMode());
   }, []);
 
-  // On first mount: check if the user has any place. If not, redirect to
-  // /onboarding where they'll choose a preset and name their first place.
-  const router = useRouter();
+  // Bootstrap: on first login the user has no locations yet; ask the server
+  // to create a starter plan. Idempotent, so safe to call on every mount.
   useEffect(() => {
     fetch("/api/bootstrap", { method: "POST" })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (data && !data.hasPlaces) {
-          router.replace("/onboarding");
+        if (data?.created) {
+          // Refresh to show the new plan
+          refresh();
         }
       })
       .catch(() => {});
@@ -125,9 +132,17 @@ export default function HomePage() {
       // Defensively check: API routes can return error objects when things
       // go wrong (e.g. no active place, foreign key error). If we don't
       // guard against that, `.map` below throws.
-      const safeCells: CellView[] = Array.isArray(locRes)
-        ? (locRes as CellView[])
-        : [];
+      // v14: /api/locations now returns { cells, flats } object instead of array.
+      let safeCells: CellView[] = [];
+      let safeFlats: FlatEdgeItem[] = [];
+      if (Array.isArray(locRes)) {
+        // Backward compat: old API returned just the cells array
+        safeCells = locRes as CellView[];
+      } else if (locRes && typeof locRes === "object") {
+        const obj = locRes as { cells?: unknown; flats?: unknown };
+        safeCells = Array.isArray(obj.cells) ? (obj.cells as CellView[]) : [];
+        safeFlats = Array.isArray(obj.flats) ? (obj.flats as FlatEdgeItem[]) : [];
+      }
       const safeBoxes = Array.isArray(boxRes)
         ? (boxRes as Array<{
             id: string;
@@ -162,6 +177,8 @@ export default function HomePage() {
         boxesFpRef.current = newBoxesFp;
         setBoxes(mappedBoxes);
       }
+      // Always update flats — small array, cheap, no ordering issues.
+      setFlats(safeFlats);
 
       // Resolve role on active place (always, it's cheap)
       type PlaceLite = {
@@ -511,6 +528,29 @@ export default function HomePage() {
             >
               + Ajouter
             </button>
+            <button
+              onClick={() => {
+                setEditMode(false);
+                setRightPanel({ kind: "none" });
+                setPlacingFlat((v) => !v);
+                setPendingFlatEdge(null);
+              }}
+              className={clsx(
+                "whitespace-nowrap font-mono text-[11px] uppercase tracking-widest px-3 py-2 border-2 border-ink transition-all",
+                placingFlat ? "bg-ink text-paper" : "bg-paper text-ink hover:bg-paper-dark",
+                isReadOnly3D && "opacity-40 cursor-not-allowed"
+              )}
+              title={
+                isReadOnly3D
+                  ? "Passez en 2D pour ajouter un cadre"
+                  : placingFlat
+                  ? "Annuler le placement de cadre"
+                  : "Cliquez ensuite sur une ligne du plan"
+              }
+              disabled={isReadOnly3D}
+            >
+              {placingFlat ? "✕ Annuler cadre" : "🖼 + Cadre"}
+            </button>
           </div>
         </div>
 
@@ -532,6 +572,7 @@ export default function HomePage() {
                 {viewMode === "2d" ? (
                   <MapGrid
                     cells={cells}
+                    flats={flats}
                     selectedCode={focusedCode}
                     highlightedCodes={highlighted}
                     measureEndpoints={{
@@ -541,6 +582,15 @@ export default function HomePage() {
                     onCellClick={handleCellClick}
                     onFurnitureClick={handleFurnitureClick}
                     placementMode={placementMode}
+                    placingFlat={placingFlat}
+                    onEdgeClick={(edge) => {
+                      setPendingFlatEdge(edge);
+                      setPlacingFlat(false);
+                      setRightPanel({ kind: "create", presetCode: null });
+                    }}
+                    onFlatClick={(flatId) => {
+                      setRightPanel({ kind: "edit", boxId: flatId });
+                    }}
                     editMode={editMode}
                     onRowMutate={editMode ? handleRowMutate : undefined}
                     onBoxDrop={handleBoxDrop}
@@ -548,6 +598,7 @@ export default function HomePage() {
                     dragEnabled={
                       !editMode &&
                       !placementMode &&
+                      !placingFlat &&
                       (activeRole === "owner" ||
                         activeRole === "admin" ||
                         activeRole === "editor")
@@ -611,6 +662,8 @@ export default function HomePage() {
             boxes={boxes}
             onSaved={handleSaved}
             readOnly={isReadOnly3D}
+            pendingFlatEdge={pendingFlatEdge}
+            clearPendingFlatEdge={() => setPendingFlatEdge(null)}
           />
         </div>
       </div>
@@ -688,6 +741,9 @@ function RightPanel(props: {
   boxes: BoxWithLoc[];
   onSaved: (id: string) => void;
   readOnly: boolean;
+  /** When set, the next "create" form should be a flat with this edge. */
+  pendingFlatEdge: { rowA: number; colA: number; rowB: number | null; colB: number | null } | null;
+  clearPendingFlatEdge: () => void;
 }) {
   const {
     editMode,
@@ -701,6 +757,8 @@ function RightPanel(props: {
     boxes,
     onSaved,
     readOnly,
+    pendingFlatEdge,
+    clearPendingFlatEdge,
   } = props;
 
   if (!editMode && panel.kind === "none") return null;
@@ -771,8 +829,16 @@ function RightPanel(props: {
           mode={{ kind: "create" }}
           locations={locationsForForm}
           presetLocationCode={panel.presetCode}
-          onSaved={onSaved}
-          onCancel={() => setPanel({ kind: "none" })}
+          presetKind={pendingFlatEdge ? "flat" : undefined}
+          presetFlatEdge={pendingFlatEdge}
+          onSaved={(id) => {
+            clearPendingFlatEdge();
+            onSaved(id);
+          }}
+          onCancel={() => {
+            clearPendingFlatEdge();
+            setPanel({ kind: "none" });
+          }}
         />
       )}
 

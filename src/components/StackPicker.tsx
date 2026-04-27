@@ -1,6 +1,7 @@
 "use client";
 
 import type { CellView } from "@/lib/types";
+import clsx from "clsx";
 
 type Props = {
   cell: CellView;
@@ -16,8 +17,14 @@ export default function StackPicker({
   onAddBox,
   onClose,
 }: Props) {
-  const sorted = [...cell.boxes].reverse(); // top first
-  const canAdd = cell.boxes.length < cell.capacity;
+  // Show boxes and flats — exclude furniture (rendered separately as a wall block)
+  const items = cell.boxes
+    .filter((b) => b.kind === "box" || b.kind === "flat")
+    .sort((a, b) => b.stackIndex - a.stackIndex); // top first
+  const totalItems = items.length;
+  const boxCount = items.filter((b) => b.kind === "box").length;
+  const flatCount = items.filter((b) => b.kind === "flat").length;
+  const canAdd = totalItems < cell.capacity;
 
   return (
     <aside className="panel p-5 reveal space-y-3">
@@ -27,10 +34,13 @@ export default function StackPicker({
             Pile · {cell.code} {!onAddBox && "· lecture seule"}
           </div>
           <h3 className="font-display text-2xl font-black text-ink leading-tight">
-            {cell.boxes.length} boîte{cell.boxes.length > 1 ? "s" : ""}
+            {totalItems} {totalItems > 1 ? "éléments" : "élément"}
           </h3>
           <p className="font-mono text-[10px] text-ink/50 uppercase tracking-widest mt-1">
-            Capacité {cell.boxes.length}/{cell.capacity}
+            {boxCount > 0 && `${boxCount} boîte${boxCount > 1 ? "s" : ""}`}
+            {boxCount > 0 && flatCount > 0 && " · "}
+            {flatCount > 0 && `${flatCount} cadre${flatCount > 1 ? "s" : ""}`}
+            {" · "}capacité {totalItems}/{cell.capacity}
           </p>
         </div>
         <button
@@ -43,23 +53,53 @@ export default function StackPicker({
       </div>
 
       <ol className="space-y-1.5">
-        {sorted.map((b, idx) => (
-          <li key={b.id}>
-            <button
-              type="button"
-              onClick={() => onPickBox(b.id)}
-              className="w-full flex items-center gap-3 p-2 border-2 border-ink shadow-stamp text-left transition-all hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-stamp-lg"
-              style={{ backgroundColor: b.color }}
-            >
-              <span className="font-mono text-[10px] text-paper/80 w-8 text-center tracking-widest">
-                {idx === 0 ? "TOP" : `#${b.stackIndex + 1}`}
-              </span>
-              <span className="font-display font-bold text-paper flex-1 truncate">
-                {b.name}
-              </span>
-            </button>
-          </li>
-        ))}
+        {items.map((b, idx) => {
+          const isFlat = b.kind === "flat";
+          return (
+            <li key={b.id}>
+              <button
+                type="button"
+                onClick={() => onPickBox(b.id)}
+                className={clsx(
+                  "w-full flex items-center gap-3 text-left transition-all",
+                  "hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-stamp-lg",
+                  isFlat
+                    ? "p-1.5 border-2 border-ink border-dashed shadow-stamp"
+                    : "p-2 border-2 border-ink shadow-stamp"
+                )}
+                style={{ backgroundColor: b.color }}
+              >
+                <span className="font-mono text-[10px] w-8 text-center tracking-widest shrink-0 text-paper/80">
+                  {idx === 0 ? "TOP" : `#${b.stackIndex + 1}`}
+                </span>
+                <span className="text-base shrink-0" aria-hidden>
+                  {isFlat
+                    ? b.flatType === "painting"
+                      ? "🎨"
+                      : b.flatType === "photo"
+                      ? "📷"
+                      : b.flatType === "poster"
+                      ? "📜"
+                      : b.flatType === "mirror"
+                      ? "🪞"
+                      : "🖼"
+                    : "📦"}
+                </span>
+                <span className="font-display font-bold text-paper flex-1 truncate">
+                  {b.name}
+                </span>
+                {isFlat && b.isFragile && (
+                  <span
+                    className="font-mono text-[8px] uppercase tracking-widest text-paper bg-safety/80 px-1 py-0.5 border border-paper/40 shrink-0"
+                    title="Fragile"
+                  >
+                    ⚠
+                  </span>
+                )}
+              </button>
+            </li>
+          );
+        })}
       </ol>
 
       {onAddBox && (

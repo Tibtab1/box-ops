@@ -1,17 +1,24 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import clsx from "clsx";
-import type { CellView, CellBoxLite, CellRenderRole } from "@/lib/types";
+import type { CellView, CellBoxLite, CellRenderRole, FlatEdgeItem } from "@/lib/types";
 import { computeCellRoles } from "@/lib/types";
 
 type Props = {
   cells: CellView[];
+  flats?: FlatEdgeItem[];
   selectedCode?: string | null;
   highlightedCodes?: Set<string>;
   measureEndpoints?: { a?: string | null; b?: string | null };
   onCellClick?: (cell: CellView) => void;
   onFurnitureClick?: (furnitureId: string) => void;
+  /** When true, the user is in "place a flat" mode: edges between cells
+   *  become clickable (visual hover effect). Click triggers onEdgeClick. */
+  placingFlat?: boolean;
+  onEdgeClick?: (edge: { rowA: number; colA: number; rowB: number | null; colB: number | null }) => void;
+  /** Click on an existing flat (by its id) — to open the edit form. */
+  onFlatClick?: (flatId: string) => void;
   placementMode?: boolean;
   editMode?: boolean;
   onRowMutate?: (
@@ -24,26 +31,24 @@ type Props = {
 };
 
 /**
- * v13.5 — Unified single-grid rendering.
+ * v14 — Edge-based flats overlay.
  *
- * Architecture change: instead of one CSS grid per row (which prevented
- * vertical furniture spans), we now place every cell in ONE big CSS grid.
- * Each cell specifies its `gridRow` and `gridColumn` explicitly based on
- * its (row, col) coordinates. Furniture anchors additionally use
- * `span N` to cover multiple grid tracks, cells covered by furniture
- * are simply not rendered.
- *
- * Row-edge buttons (add/remove cells) are rendered as a separate thin
- * column to the left and right of the main grid, with explicit row
- * placement to align with each data row.
+ * Flats no longer live inside cells. They live on the EDGE between two
+ * adjacent cells (or between a cell and the outer space). We render an
+ * absolutely-positioned overlay layer on top of the grid, with clickable
+ * hotspots on each adjacency edge.
  */
 export default function MapGrid({
   cells,
+  flats = [],
   selectedCode,
   highlightedCodes,
   measureEndpoints,
   onCellClick,
   onFurnitureClick,
+  placingFlat,
+  onEdgeClick,
+  onFlatClick,
   placementMode,
   editMode,
   onRowMutate,
@@ -279,12 +284,354 @@ export default function MapGrid({
                 />
               );
             })}
+
+          {/* Edge overlay: clickable hotspots + rendered flat lines */}
+          <EdgeOverlay
+            rowsList={rowsList}
+            globalMinCol={globalMinCol}
+            globalMaxCol={globalMaxCol}
+            totalCols={totalCols}
+            cellByCode={cellByCode}
+            flats={flats}
+            placingFlat={!!placingFlat}
+            editMode={!!editMode}
+            onEdgeClick={onEdgeClick}
+            onFlatClick={onFlatClick}
+          />
         </div>
       </div>
     </div>
   );
   // cellByCode is kept for future use (neighbor lookups etc.)
   void cellByCode;
+}
+
+// ─── Edge overlay (flats + click hotspots) ────────────────────────────
+const CELL_PX = 80;     // 5rem at default font-size
+const GAP_PX = 4;       // 0.25rem at default font-size
+const EDGE_BTN_PX = 36; // 2.25rem (left/right edge button column)
+
+function EdgeOverlay(props: {
+  rowsList: Array<{ row: number; cells: CellView[] }>;
+  globalMinCol: number;
+  globalMaxCol: number;
+  totalCols: number;
+  cellByCode: Map<string, CellView>;
+  flats: FlatEdgeItem[];
+  placingFlat: boolean;
+  editMode: boolean;
+  onEdgeClick?: (edge: { rowA: number; colA: number; rowB: number | null; colB: number | null }) => void;
+  onFlatClick?: (flatId: string) => void;
+}) {
+  const {
+    rowsList, globalMinCol, totalCols, cellByCode,
+    flats, placingFlat, editMode, onEdgeClick, onFlatClick,
+  } = props;
+
+  if (rowsList.length === 0) return null;
+
+  // The overlay spans the full grid area, but excludes the left/right edge
+  // button columns. We place it via gridColumn/gridRow on the grid itself.
+  const overlayStyle: CSSProperties = {
+    gridColumn: `2 / ${totalCols + 2}`, // column 1 is left buttons, last is right
+    gridRow: `1 / ${rowsList.length + 1}`,
+    position: "relative",
+    pointerEvents: "none",
+    zIndex: 5,
+  };
+
+  // Convert (row, col) to (x, y) center in px, RELATIVE to the overlay's
+  // top-left (which is at the top-left of the cell grid area, after edge btns).
+  const cellCenter = (row: number, col: number) => {
+    const rowIdx = rowsList.findIndex((r) => r.row === row);
+    const colIdx = col - globalMinCol;
+    const x = colIdx * (CELL_PX + GAP_PX) + CELL_PX / 2;
+    const y = rowIdx * (CELL_PX + GAP_PX) + CELL_PX / 2;
+    return { x, y };
+  };
+
+  // Check if a cell exists at (row, col) in this place
+  const cellAt = (row: number, col: number): CellView | null => {
+    for (const cell of cellByCode.values()) {
+      if (cell.row === row && cell.col === col) return cell;
+    }
+    return null;
+  };
+
+  // Build the list of all candidate edges in the plan: between each pair of
+  // adjacent cells, plus outer edges (cell + null neighbor).
+  type CandidateEdge = {
+    rowA: number; colA: number;
+    rowB: number | null; colB: number | null;
+    orientation: "horizontal" | "vertical";
+  };
+  const candidates: CandidateEdge[] = [];
+  for (const cell of cellByCode.values()) {
+    // East edge (cell + east neighbor)
+    const east = cellAt(cell.row, cell.col + 1);
+    if (east) {
+      // Only add once: keep the leftmost as A
+      candidates.push({
+        rowA: cell.row, colA: cell.col,
+        rowB: east.row, colB: east.col,
+        orientation: "vertical",
+      });
+    } else {
+      // Outer edge on the east side
+      candidates.push({
+        rowA: cell.row, colA: cell.col,
+        rowB: null, colB: null,
+        orientation: "vertical",
+      });
+    }
+    // South edge
+    const south = cellAt(cell.row + 1, cell.col);
+    if (south) {
+      candidates.push({
+        rowA: cell.row, colA: cell.col,
+        rowB: south.row, colB: south.col,
+        orientation: "horizontal",
+      });
+    } else {
+      candidates.push({
+        rowA: cell.row, colA: cell.col,
+        rowB: null, colB: null,
+        orientation: "horizontal",
+      });
+    }
+  }
+  // Also handle North-outer and West-outer for cells with no neighbor in those
+  // directions (so flats can be placed against the outer wall).
+  for (const cell of cellByCode.values()) {
+    const north = cellAt(cell.row - 1, cell.col);
+    if (!north) {
+      candidates.push({
+        rowA: cell.row, colA: cell.col,
+        rowB: null, colB: null,
+        orientation: "horizontal",
+      });
+    }
+    const west = cellAt(cell.row, cell.col - 1);
+    if (!west) {
+      candidates.push({
+        rowA: cell.row, colA: cell.col,
+        rowB: null, colB: null,
+        orientation: "vertical",
+      });
+    }
+  }
+
+  // Helper: get edge geometry (where to draw it)
+  const edgeGeometry = (e: { rowA: number; colA: number; rowB: number | null; colB: number | null }) => {
+    const a = cellCenter(e.rowA, e.colA);
+    if (e.rowB !== null && e.colB !== null) {
+      const b = cellCenter(e.rowB, e.colB);
+      // Midpoint between the two cells
+      const x = (a.x + b.x) / 2;
+      const y = (a.y + b.y) / 2;
+      // Orientation: horizontal if same column (different rows), vertical if same row
+      const horizontal = e.rowA !== e.rowB;
+      return { x, y, horizontal, isOuter: false };
+    } else {
+      // Outer edge: we don't have a clear orientation just from (A) — but the
+      // candidate list separately encodes orientation. We'll compute outer
+      // geometry differently per orientation in the render function below.
+      return { x: a.x, y: a.y, horizontal: false, isOuter: true };
+    }
+  };
+
+  // Map edge to its flats
+  const edgeKey = (rowA: number, colA: number, rowB: number | null, colB: number | null, orientation?: string): string => {
+    if (rowB === null || colB === null) {
+      return `${rowA}-${colA}-OUT-${orientation ?? ""}`;
+    }
+    const a = `${rowA}-${colA}`;
+    const b = `${rowB}-${colB}`;
+    return a < b ? `${a}|${b}` : `${b}|${a}`;
+  };
+  const flatsByEdge = new Map<string, FlatEdgeItem[]>();
+  for (const f of flats) {
+    const k = edgeKey(f.rowA, f.colA, f.rowB, f.colB);
+    const arr = flatsByEdge.get(k) ?? [];
+    arr.push(f);
+    flatsByEdge.set(k, arr);
+  }
+
+  return (
+    <div style={overlayStyle}>
+      {/* Hotspots: only when in placing mode */}
+      {placingFlat && candidates.map((e, idx) => {
+        const a = cellCenter(e.rowA, e.colA);
+        const isHorizontal = e.orientation === "horizontal";
+        // For outer edges, offset position to be "outside" the cell
+        let x = a.x;
+        let y = a.y;
+        let width: number;
+        let height: number;
+        if (e.rowB !== null && e.colB !== null) {
+          const b = cellCenter(e.rowB, e.colB);
+          x = (a.x + b.x) / 2;
+          y = (a.y + b.y) / 2;
+          if (isHorizontal) {
+            width = CELL_PX - 8;
+            height = 12;
+          } else {
+            width = 12;
+            height = CELL_PX - 8;
+          }
+        } else {
+          // Outer edge: place along the cell's outer boundary
+          // For outer horizontal: top or bottom; we don't know which, so
+          // we render only the south outer edges (already in candidates) for now
+          // — the north-only ones are added explicitly below.
+          // Determine if it's north (above cell) or below: we use a heuristic
+          // from the orientation list: horizontal candidates with rowB=null
+          // can be either north or south. Let's treat them all as "south"
+          // for cells whose south neighbor is missing, otherwise as north.
+          // Actually: the candidate generation above already has duplicates
+          // possible (south outer + north outer for top row). Let's just
+          // detect from cellAt:
+          if (isHorizontal) {
+            // Check: does cell have a north neighbor?
+            const north = cellAt(e.rowA - 1, e.colA);
+            const south = cellAt(e.rowA + 1, e.colA);
+            // If candidate was added from "no south" → south outer
+            // If added from "no north" → north outer
+            // We can't distinguish in this loop without state, so just place:
+            //   - if no south → bottom of cell
+            //   - if no north and we already placed south, place north
+            // To keep it simple: place an outer edge only on the side where
+            // there's no neighbor. If both missing, render two (already in
+            // candidates).
+            if (!south) {
+              y = a.y + CELL_PX / 2;
+            } else if (!north) {
+              y = a.y - CELL_PX / 2;
+            }
+            width = CELL_PX - 8;
+            height = 12;
+          } else {
+            const east = cellAt(e.rowA, e.colA + 1);
+            const west = cellAt(e.rowA, e.colA - 1);
+            if (!east) {
+              x = a.x + CELL_PX / 2;
+            } else if (!west) {
+              x = a.x - CELL_PX / 2;
+            }
+            width = 12;
+            height = CELL_PX - 8;
+          }
+        }
+        return (
+          <button
+            key={`hot-${idx}-${e.rowA}-${e.colA}-${e.rowB}-${e.colB}-${e.orientation}`}
+            type="button"
+            onClick={(ev) => {
+              ev.stopPropagation();
+              onEdgeClick?.({
+                rowA: e.rowA, colA: e.colA,
+                rowB: e.rowB, colB: e.colB,
+              });
+            }}
+            className="absolute pointer-events-auto bg-blueprint/0 hover:bg-blueprint/40 border border-blueprint/0 hover:border-blueprint transition-colors"
+            style={{
+              left: x - width / 2,
+              top: y - height / 2,
+              width,
+              height,
+              cursor: "pointer",
+              borderRadius: 2,
+            }}
+            title="Cliquer pour poser un cadre ici"
+          />
+        );
+      })}
+
+      {/* Flats: drawn as colored bars on each edge */}
+      {flats.map((f) => {
+        const a = cellCenter(f.rowA, f.colA);
+        const isOuter = f.rowB === null || f.colB === null;
+        let isHorizontal: boolean;
+        if (!isOuter) {
+          // Same row → vertical bar; same col → horizontal bar
+          isHorizontal = f.rowA !== f.rowB;
+        } else {
+          // For outer edges, we need to figure out orientation from neighbors.
+          // Heuristic: if no cell to the east AND a is at colA = max col among
+          // cells in its row → outer east → vertical. Etc.
+          // Simpler: store the orientation in the edge candidate list keyed by
+          // row/col. For now, use a heuristic: prefer horizontal (south) outer
+          // unless the cell has no east/west neighbor.
+          const east = cellAt(f.rowA, f.colA + 1);
+          const west = cellAt(f.rowA, f.colA - 1);
+          const north = cellAt(f.rowA - 1, f.colA);
+          const south = cellAt(f.rowA + 1, f.colA);
+          if (!east || !west) {
+            isHorizontal = false; // vertical outer
+          } else {
+            isHorizontal = true; // horizontal outer
+          }
+        }
+
+        // Compute bar position
+        let x = a.x;
+        let y = a.y;
+        if (!isOuter && f.rowB !== null && f.colB !== null) {
+          const b = cellCenter(f.rowB, f.colB);
+          x = (a.x + b.x) / 2;
+          y = (a.y + b.y) / 2;
+        } else {
+          // Outer: place at cell boundary
+          if (isHorizontal) {
+            const south = cellAt(f.rowA + 1, f.colA);
+            if (!south) y = a.y + CELL_PX / 2;
+            else y = a.y - CELL_PX / 2;
+          } else {
+            const east = cellAt(f.rowA, f.colA + 1);
+            if (!east) x = a.x + CELL_PX / 2;
+            else x = a.x - CELL_PX / 2;
+          }
+        }
+
+        // Stack offset: multiple flats on the same edge are drawn parallel
+        const stackOffset = f.stackIndex * 5;
+
+        const barStyle: CSSProperties = isHorizontal
+          ? {
+              left: x - (CELL_PX - 16) / 2,
+              top: y - 2 + stackOffset,
+              width: CELL_PX - 16,
+              height: 4,
+            }
+          : {
+              left: x - 2 + stackOffset,
+              top: y - (CELL_PX - 16) / 2,
+              width: 4,
+              height: CELL_PX - 16,
+            };
+
+        return (
+          <button
+            key={f.id}
+            type="button"
+            onClick={(ev) => {
+              ev.stopPropagation();
+              onFlatClick?.(f.id);
+            }}
+            className="absolute pointer-events-auto border border-black/40 hover:scale-y-150 hover:scale-x-150 transition-transform"
+            style={{
+              ...barStyle,
+              backgroundColor: f.color || "#e8602c",
+              boxShadow: "0 0 4px rgba(0,0,0,0.6)",
+              borderRadius: 1,
+              cursor: "pointer",
+            }}
+            title={`🖼 ${f.name}${f.isFragile ? " (fragile)" : ""}`}
+          />
+        );
+      })}
+    </div>
+  );
 }
 
 // ─── Cell or furniture block ──────────────────────────────────────────
@@ -429,7 +776,10 @@ function CellOrFurniture(props: {
     );
   }
 
-  // ─── Normal cell (possibly stacked boxes) ───
+  // ─── Normal cell (possibly stacked boxes + flats) ───
+  // Mix boxes and flats in the same pile sorted by stackIndex.
+  // - Boxes occupy full visual slots
+  // ─── Normal cell (boxes only — flats now live as edges in the overlay) ───
   const boxStack = cell.boxes.filter((b) => b.kind === "box");
   const topBox = boxStack[boxStack.length - 1];
   const stackSize = boxStack.length;
@@ -446,14 +796,14 @@ function CellOrFurniture(props: {
   const isDropTarget = isBoxDropTarget || isFurnitureDropTarget;
   const isDragOverHere = isDropTarget && dragOverCode === cell.code;
 
-  const canDragTop = dragEnabled && occupied;
+  const canDragTop = dragEnabled && stackSize > 0;
 
   return (
     <button
       type="button"
       style={{
         ...placementStyle,
-        backgroundColor: occupied && topBox ? topBox.color : undefined,
+        backgroundColor: topBox ? topBox.color : undefined,
       }}
       disabled={!clickable && !isDropTarget}
       onClick={() => onCellClick?.(cell)}

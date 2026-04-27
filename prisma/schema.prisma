@@ -154,12 +154,24 @@ model Box {
   tags        String    @default("")
   photoUrl    String?
   color       String    @default("#e8602c")
-  kind        String    @default("box")     // "box" | "furniture"
-  spanW       Int       @default(1)         // 1..3
-  spanH       Int       @default(1)         // 1..3
+  kind        String    @default("box")     // "box" | "furniture" | "flat"
+  spanW       Int       @default(1)         // 1..3 (furniture only)
+  spanH       Int       @default(1)         // 1..3 (furniture only)
   locationId  String?                       // null when parentId is set
   stackIndex  Int       @default(0)
   parentId    String?                       // if set, this box lives inside a furniture item
+  // Flat (frame/painting) specific fields — nullable, only populated when kind = "flat"
+  widthCm             Int?
+  heightCm            Int?
+  flatType            String?               // "painting" | "photo" | "poster" | "mirror" | "other"
+  isFragile           Boolean  @default(false)
+  estimatedValueCents Int?                  // value in cents (e.g. 12500 = 125,00 €)
+  flatEdge            String?               // DEPRECATED legacy column ("N"|"S"|"E"|"W"), kept for safety
+  // v2 flat positioning: a flat is an edge between two cells (or a cell and outer space)
+  flatEdgeRowA        Int?
+  flatEdgeColA        Int?
+  flatEdgeRowB        Int?
+  flatEdgeColB        Int?
   place       Place     @relation(fields: [placeId], references: [id], onDelete: Cascade)
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   location    Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)

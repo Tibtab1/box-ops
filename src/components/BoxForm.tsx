@@ -22,7 +22,15 @@ type Props = {
   /** When creating a child inside a furniture, provide the parent's ID */
   parentFurnitureId?: string | null;
   /** When creating as a furniture item, skip the toggle and start in furniture mode */
-  presetKind?: "box" | "furniture";
+  presetKind?: "box" | "furniture" | "flat";
+  /** When creating a flat from clicking on the plan, the parent provides
+   *  the edge coordinates the user clicked on. */
+  presetFlatEdge?: {
+    rowA: number;
+    colA: number;
+    rowB: number | null;
+    colB: number | null;
+  } | null;
   onSaved: (boxId: string) => void;
   onCancel: () => void;
 };
@@ -33,6 +41,7 @@ export default function BoxForm({
   presetLocationCode,
   parentFurnitureId,
   presetKind,
+  presetFlatEdge,
   onSaved,
   onCancel,
 }: Props) {
@@ -51,11 +60,25 @@ export default function BoxForm({
   const [hydrated, setHydrated] = useState(mode.kind === "create");
 
   // ── v13: furniture support ──
-  const [kind, setKind] = useState<"box" | "furniture">(
+  const [kind, setKind] = useState<"box" | "furniture" | "flat">(
     presetKind ?? "box"
   );
   const [spanW, setSpanW] = useState<number>(1);
   const [spanH, setSpanH] = useState<number>(1);
+  // Flat-specific fields
+  const [widthCm, setWidthCm] = useState<string>("");
+  const [heightCm, setHeightCm] = useState<string>("");
+  const [flatType, setFlatType] = useState<"painting" | "photo" | "poster" | "mirror" | "other">("painting");
+  const [isFragile, setIsFragile] = useState<boolean>(false);
+  const [estimatedValueEuros, setEstimatedValueEuros] = useState<string>("");
+  // Edge coordinates for the flat (set from preset when creating, or loaded
+  // from the box record when editing).
+  const [flatEdgeCoords, setFlatEdgeCoords] = useState<{
+    rowA: number;
+    colA: number;
+    rowB: number | null;
+    colB: number | null;
+  } | null>(presetFlatEdge ?? null);
   // Track if we're inside a furniture (child creation). Cannot be a furniture then.
   const insideFurniture = !!parentFurnitureId;
 
@@ -90,6 +113,26 @@ export default function BoxForm({
         setKind(b.kind ?? "box");
         setSpanW(b.spanW ?? 1);
         setSpanH(b.spanH ?? 1);
+        // v13.6: load flat-specific fields if present
+        if (b.kind === "flat") {
+          setWidthCm(b.widthCm != null ? String(b.widthCm) : "");
+          setHeightCm(b.heightCm != null ? String(b.heightCm) : "");
+          setFlatType(b.flatType ?? "painting");
+          setIsFragile(!!b.isFragile);
+          if (typeof b.flatEdgeRowA === "number" && typeof b.flatEdgeColA === "number") {
+            setFlatEdgeCoords({
+              rowA: b.flatEdgeRowA,
+              colA: b.flatEdgeColA,
+              rowB: typeof b.flatEdgeRowB === "number" ? b.flatEdgeRowB : null,
+              colB: typeof b.flatEdgeColB === "number" ? b.flatEdgeColB : null,
+            });
+          }
+          setEstimatedValueEuros(
+            b.estimatedValueCents != null
+              ? String((b.estimatedValueCents / 100).toFixed(2))
+              : ""
+          );
+        }
         setHydrated(true);
       });
   }, [mode]);
@@ -151,15 +194,21 @@ export default function BoxForm({
       color: activeColor,
     };
 
-    // Branch on scenario: child inside furniture / furniture on plan / normal box
+    // Branch on scenario: child inside furniture / furniture on plan / flat / normal box
     if (mode.kind === "create" && insideFurniture) {
       payload.parentId = parentFurnitureId;
-      // kind stays "box" for children, no location needed
+      // children inherit kind from current selection (box or flat)
+      if (kind === "flat") {
+        payload.kind = "flat";
+      }
     } else if (kind === "furniture") {
       payload.kind = "furniture";
       payload.spanW = spanW;
       payload.spanH = spanH;
       payload.locationCode = locationCode || null;
+    } else if (kind === "flat") {
+      payload.kind = "flat";
+      // No locationCode: a flat lives on an edge, not in a cell.
     } else {
       payload.kind = "box";
       payload.locationCode = locationCode || null;
@@ -169,6 +218,26 @@ export default function BoxForm({
     if (mode.kind === "edit" && kind === "furniture") {
       payload.spanW = spanW;
       payload.spanH = spanH;
+    }
+
+    // For flat (create or edit), include the flat-specific fields
+    if (kind === "flat") {
+      const w = widthCm.trim() ? parseInt(widthCm, 10) : null;
+      const h = heightCm.trim() ? parseInt(heightCm, 10) : null;
+      payload.widthCm = w && !isNaN(w) && w > 0 ? w : null;
+      payload.heightCm = h && !isNaN(h) && h > 0 ? h : null;
+      payload.flatType = flatType;
+      payload.isFragile = isFragile;
+      const valStr = estimatedValueEuros.trim().replace(",", ".");
+      const val = valStr ? parseFloat(valStr) : null;
+      payload.estimatedValueCents =
+        val !== null && !isNaN(val) && val >= 0 ? Math.round(val * 100) : null;
+      if (flatEdgeCoords) {
+        payload.flatEdgeRowA = flatEdgeCoords.rowA;
+        payload.flatEdgeColA = flatEdgeCoords.colA;
+        payload.flatEdgeRowB = flatEdgeCoords.rowB;
+        payload.flatEdgeColB = flatEdgeCoords.colB;
+      }
     }
 
     try {
@@ -217,12 +286,18 @@ export default function BoxForm({
           <h2 className="font-display text-2xl font-black text-ink leading-tight">
             {mode.kind === "create"
               ? insideFurniture
-                ? "Nouvelle boîte (dans le meuble)"
+                ? kind === "flat"
+                  ? "Nouveau cadre (dans le meuble)"
+                  : "Nouvelle boîte (dans le meuble)"
                 : kind === "furniture"
                 ? "Nouveau meuble"
+                : kind === "flat"
+                ? "Nouveau cadre"
                 : "Nouvelle boîte"
               : kind === "furniture"
               ? "Éditer le meuble"
+              : kind === "flat"
+              ? "Éditer le cadre"
               : "Éditer la boîte"}
           </h2>
         </div>
@@ -236,9 +311,12 @@ export default function BoxForm({
         </button>
       </div>
 
-      {/* Kind toggle (creation mode only, not for children-inside-furniture) */}
-      {mode.kind === "create" && !insideFurniture && !presetKind && (
-        <div className="grid grid-cols-2 gap-1.5 p-1 bg-paper-dark/30 border-2 border-ink">
+      {/* Kind toggle (creation mode only) */}
+      {mode.kind === "create" && !presetKind && (
+        <div className={clsx(
+          "grid gap-1.5 p-1 bg-paper-dark/30 border-2 border-ink",
+          insideFurniture ? "grid-cols-2" : "grid-cols-3"
+        )}>
           <button
             type="button"
             onClick={() => setKind("box")}
@@ -251,17 +329,31 @@ export default function BoxForm({
           >
             📦 Boîte
           </button>
+          {!insideFurniture && (
+            <button
+              type="button"
+              onClick={() => setKind("furniture")}
+              className={clsx(
+                "font-mono text-[10px] uppercase tracking-widest py-2 transition-all",
+                kind === "furniture"
+                  ? "bg-ink text-paper"
+                  : "text-ink/60 hover:text-ink"
+              )}
+            >
+              🪑 Meuble
+            </button>
+          )}
           <button
             type="button"
-            onClick={() => setKind("furniture")}
+            onClick={() => setKind("flat")}
             className={clsx(
               "font-mono text-[10px] uppercase tracking-widest py-2 transition-all",
-              kind === "furniture"
+              kind === "flat"
                 ? "bg-ink text-paper"
                 : "text-ink/60 hover:text-ink"
             )}
           >
-            🪑 Meuble
+            🖼 Cadre
           </button>
         </div>
       )}
@@ -305,6 +397,114 @@ export default function BoxForm({
             Ce meuble occupera une zone de {spanW}×{spanH} cellules sur le plan.
           </p>
         </Field>
+      )}
+
+      {/* Flat (frame/painting/etc.) specific fields */}
+      {kind === "flat" && (
+        <div className="space-y-3 p-3 border-2 border-ink/30 bg-paper-dark/20">
+          <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink font-bold">
+            🖼 Détails du cadre
+          </div>
+
+          <Field label="Type">
+            <div className="grid grid-cols-5 gap-1">
+              {(["painting", "photo", "poster", "mirror", "other"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setFlatType(t)}
+                  className={clsx(
+                    "font-mono text-[9px] uppercase tracking-widest py-2 border-2 transition-all flex flex-col items-center gap-0.5",
+                    flatType === t
+                      ? "bg-ink text-paper border-ink"
+                      : "border-ink/30 text-ink/70 hover:border-ink"
+                  )}
+                  title={t === "painting" ? "Tableau" : t === "photo" ? "Photo" : t === "poster" ? "Poster" : t === "mirror" ? "Miroir" : "Autre"}
+                >
+                  <span className="text-base leading-none">
+                    {t === "painting" ? "🎨" : t === "photo" ? "📷" : t === "poster" ? "📜" : t === "mirror" ? "🪞" : "🖼"}
+                  </span>
+                  <span className="text-[8px]">
+                    {t === "painting" ? "Tableau" : t === "photo" ? "Photo" : t === "poster" ? "Poster" : t === "mirror" ? "Miroir" : "Autre"}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </Field>
+
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Largeur (cm)">
+              <input
+                type="number"
+                min={1}
+                max={9999}
+                step={1}
+                className="input-field"
+                value={widthCm}
+                onChange={(e) => setWidthCm(e.target.value)}
+                placeholder="60"
+              />
+            </Field>
+            <Field label="Hauteur (cm)">
+              <input
+                type="number"
+                min={1}
+                max={9999}
+                step={1}
+                className="input-field"
+                value={heightCm}
+                onChange={(e) => setHeightCm(e.target.value)}
+                placeholder="80"
+              />
+            </Field>
+          </div>
+
+          <Field label="Position du cadre (arête)">
+            {flatEdgeCoords ? (
+              <div className="border-2 border-ink/40 bg-paper-dark/30 px-3 py-2.5 font-mono text-xs">
+                <div className="text-ink font-bold uppercase tracking-widest">
+                  Entre R{flatEdgeCoords.rowA + 1}-{flatEdgeCoords.colA + 1}
+                  {flatEdgeCoords.rowB !== null && flatEdgeCoords.colB !== null
+                    ? ` et R${flatEdgeCoords.rowB + 1}-${flatEdgeCoords.colB + 1}`
+                    : " et l'extérieur"}
+                </div>
+                <div className="text-ink/50 text-[9px] uppercase tracking-widest mt-1">
+                  Pour changer la position, annule et clique sur une autre ligne du plan.
+                </div>
+              </div>
+            ) : (
+              <div className="border-2 border-dashed border-ink/30 bg-paper-dark/20 px-3 py-2.5 font-mono text-xs text-ink/60">
+                Aucune arête sélectionnée. Annule et clique sur une ligne du plan pour positionner ce cadre.
+              </div>
+            )}
+          </Field>
+
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isFragile}
+              onChange={(e) => setIsFragile(e.target.checked)}
+              className="w-4 h-4 accent-safety"
+            />
+            <span className="font-mono text-xs uppercase tracking-widest text-ink">
+              ⚠ Fragile (manipuler avec soin)
+            </span>
+          </label>
+
+          <Field label="Valeur estimée (€, optionnel)">
+            <input
+              type="text"
+              inputMode="decimal"
+              className="input-field"
+              value={estimatedValueEuros}
+              onChange={(e) => setEstimatedValueEuros(e.target.value)}
+              placeholder="125.00"
+            />
+            <p className="font-mono text-[9px] text-ink/50 mt-1">
+              Pour assurance ou inventaire. Reste privé.
+            </p>
+          </Field>
+        </div>
       )}
 
       <Field label="Nom" required>
@@ -429,7 +629,7 @@ export default function BoxForm({
         </div>
       </Field>
 
-      {!insideFurniture && (
+      {!insideFurniture && kind !== "flat" && (
         <Field
           label={
             kind === "furniture"
@@ -467,7 +667,7 @@ export default function BoxForm({
 
       {insideFurniture && (
         <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink/60 bg-paper-dark/30 border-2 border-dashed border-ink/30 px-3 py-2">
-          📥 Cette boîte sera rangée dans le meuble parent.
+          📥 {kind === "flat" ? "Ce cadre" : "Cette boîte"} sera rangé{kind === "flat" ? "" : "e"} dans le meuble parent.
         </div>
       )}
 

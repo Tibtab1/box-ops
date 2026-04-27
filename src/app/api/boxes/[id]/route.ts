@@ -42,7 +42,7 @@ export async function GET(
     }));
   }
 
-  if (box.location && !box.parentId && box.kind === "box") {
+  if (box.location && !box.parentId && (box.kind === "box")) {
     const { row, col, id: locId, capacity: cap } = box.location;
     capacity = cap;
 
@@ -113,6 +113,59 @@ export async function PATCH(
   if (typeof body.photoUrl === "string" || body.photoUrl === null) data.photoUrl = body.photoUrl;
   if (Array.isArray(body.tags)) data.tags = serializeTags(body.tags);
   else if (typeof body.tags === "string") data.tags = body.tags;
+
+  // Flat-specific fields (only meaningful when box is a flat)
+  if (box.kind === "flat") {
+    if (typeof body.widthCm === "number" && body.widthCm > 0 && body.widthCm < 10000) {
+      data.widthCm = Math.round(body.widthCm);
+    } else if (body.widthCm === null) {
+      data.widthCm = null;
+    }
+    if (typeof body.heightCm === "number" && body.heightCm > 0 && body.heightCm < 10000) {
+      data.heightCm = Math.round(body.heightCm);
+    } else if (body.heightCm === null) {
+      data.heightCm = null;
+    }
+    const validFlatTypes = ["painting", "photo", "poster", "mirror", "other"];
+    if (typeof body.flatType === "string" && validFlatTypes.includes(body.flatType)) {
+      data.flatType = body.flatType;
+    } else if (body.flatType === null) {
+      data.flatType = null;
+    }
+    if (typeof body.isFragile === "boolean") {
+      data.isFragile = body.isFragile;
+    }
+    if (typeof body.estimatedValueCents === "number" && body.estimatedValueCents >= 0 && body.estimatedValueCents < 100000000) {
+      data.estimatedValueCents = Math.round(body.estimatedValueCents);
+    } else if (body.estimatedValueCents === null) {
+      data.estimatedValueCents = null;
+    }
+    // Edge coordinates: when the user moves a flat to another edge.
+    // We accept all 4 together (rowA, colA, rowB, colB) — rowB/colB can be null.
+    if (
+      typeof body.flatEdgeRowA === "number" &&
+      typeof body.flatEdgeColA === "number"
+    ) {
+      const aR = body.flatEdgeRowA;
+      const aC = body.flatEdgeColA;
+      const bR = typeof body.flatEdgeRowB === "number" ? body.flatEdgeRowB : null;
+      const bC = typeof body.flatEdgeColB === "number" ? body.flatEdgeColB : null;
+      if (bR !== null && bC !== null) {
+        // Validate adjacency
+        const dr = Math.abs(aR - bR);
+        const dc = Math.abs(aC - bC);
+        if (!((dr === 1 && dc === 0) || (dr === 0 && dc === 1))) {
+          return NextResponse.json({
+            error: "Les cellules de l'arête doivent être adjacentes."
+          }, { status: 400 });
+        }
+      }
+      data.flatEdgeRowA = aR;
+      data.flatEdgeColA = aC;
+      data.flatEdgeRowB = bR;
+      data.flatEdgeColB = bC;
+    }
+  }
 
   // === Case A: moving a FURNITURE item ======================================
   if (box.kind === "furniture") {
@@ -421,7 +474,7 @@ export async function DELETE(
 
   await prisma.box.delete({ where: { id: params.id } });
 
-  if (box.locationId && box.kind === "box") {
+  if (box.locationId && (box.kind === "box")) {
     await compactStack(box.locationId, box.stackIndex);
   }
   if (box.parentId) {

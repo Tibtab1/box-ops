@@ -616,7 +616,7 @@ export default function HomePage() {
                       setRightPanel({ kind: "create", presetCode: null });
                     }}
                     onFlatClick={(flatId) => {
-                      setRightPanel({ kind: "edit", boxId: flatId });
+                      setRightPanel({ kind: "detail", boxId: flatId });
                     }}
                     editMode={editMode}
                     onRowMutate={editMode ? handleRowMutate : undefined}

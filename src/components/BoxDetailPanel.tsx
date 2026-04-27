@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import clsx from "clsx";
 import MoveHistory from "./MoveHistory";
+import { FLAT_TYPE_LABELS, type FlatType } from "@/lib/types";
 
 type BoxDetail = {
   id: string;
@@ -13,6 +14,17 @@ type BoxDetail = {
   photoUrl: string | null;
   stackIndex: number;
   location: { code: string; row: number; col: number } | null;
+  kind?: "box" | "furniture" | "flat";
+  // Flat-specific
+  widthCm?: number | null;
+  heightCm?: number | null;
+  flatType?: FlatType | null;
+  isFragile?: boolean;
+  estimatedValueCents?: number | null;
+  flatEdgeRowA?: number | null;
+  flatEdgeColA?: number | null;
+  flatEdgeRowB?: number | null;
+  flatEdgeColB?: number | null;
 };
 
 type NeighborBox = {
@@ -125,7 +137,7 @@ export default function BoxDetailPanel({
           />
           <div className="min-w-0">
             <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink/60">
-              Fiche boîte {readOnly && "· lecture seule"}
+              {box.kind === "flat" ? "Fiche cadre" : "Fiche boîte"}{readOnly && " · lecture seule"}
             </div>
             <h3 className="font-display text-2xl font-black text-ink leading-tight break-words">
               {box.name}
@@ -141,7 +153,14 @@ export default function BoxDetailPanel({
         </button>
       </div>
 
-      {box.location ? (
+      {box.kind === "flat" ? (
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
+          <span className="stamp-badge bg-blueprint text-paper border-ink">
+            ⊞ Arête R{box.flatEdgeRowA}:{box.flatEdgeColA}
+            {box.flatEdgeRowB != null ? ` → R${box.flatEdgeRowB}:${box.flatEdgeColB}` : " (bord)"}
+          </span>
+        </div>
+      ) : box.location ? (
         <div className="flex items-center gap-2 mb-4 flex-wrap">
           <span className="stamp-badge bg-ink text-paper border-ink">
             ◉ {box.location.code}
@@ -261,9 +280,45 @@ export default function BoxDetailPanel({
         </div>
       )}
 
-      <div className="mb-5">
-        <MoveHistory boxId={box.id} />
-      </div>
+      {box.kind === "flat" && (
+        <div className="mb-5">
+          <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-ink/60 mb-2 pb-2 border-b border-dashed border-ink/30">
+            Informations cadre
+          </div>
+          <dl className="space-y-1.5">
+            {box.flatType && (
+              <div className="flex justify-between font-mono text-[11px]">
+                <dt className="text-ink/60">Type</dt>
+                <dd className="font-bold">{FLAT_TYPE_LABELS[box.flatType] ?? box.flatType}</dd>
+              </div>
+            )}
+            {box.widthCm != null && box.heightCm != null && (
+              <div className="flex justify-between font-mono text-[11px]">
+                <dt className="text-ink/60">Dimensions</dt>
+                <dd className="font-bold">{box.widthCm} × {box.heightCm} cm</dd>
+              </div>
+            )}
+            {box.estimatedValueCents != null && (
+              <div className="flex justify-between font-mono text-[11px]">
+                <dt className="text-ink/60">Valeur estimée</dt>
+                <dd className="font-bold">{(box.estimatedValueCents / 100).toFixed(2)} €</dd>
+              </div>
+            )}
+            {box.isFragile && (
+              <div className="flex justify-between font-mono text-[11px]">
+                <dt className="text-ink/60">Fragile</dt>
+                <dd className="font-bold text-safety">⚠ Oui</dd>
+              </div>
+            )}
+          </dl>
+        </div>
+      )}
+
+      {box.kind !== "flat" && (
+        <div className="mb-5">
+          <MoveHistory boxId={box.id} />
+        </div>
+      )}
 
       {/* Action buttons — hidden entirely in read-only */}
       {(onEdit || canDelete) && (

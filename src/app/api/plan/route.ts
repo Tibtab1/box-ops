@@ -140,6 +140,7 @@ async function removeCellRight(placeId: string, body: { row: number }) {
   if (boxCount > 0) {
     return NextResponse.json({ error: `${boxCount} boîte(s) sur ${last.code}.` }, { status: 409 });
   }
+  await deleteOrphanFlats(placeId, last.row, last.col);
   await prisma.location.delete({ where: { id: last.id } });
   return NextResponse.json({ ok: true });
 }
@@ -155,6 +156,7 @@ async function removeCellLeft(placeId: string, body: { row: number }) {
   if (boxCount > 0) {
     return NextResponse.json({ error: `${boxCount} boîte(s) sur ${first.code}.` }, { status: 409 });
   }
+  await deleteOrphanFlats(placeId, first.row, first.col);
   await prisma.location.delete({ where: { id: first.id } });
   return NextResponse.json({ ok: true });
 }
@@ -205,6 +207,22 @@ async function removeRow(placeId: string, body: { row: number }) {
     return NextResponse.json({ error: `${boxCount} boîte(s) sur cette rangée.` }, { status: 409 });
   }
 
+  // Delete flats touching this row, then shift coordinates of flats below.
+  await prisma.box.deleteMany({
+    where: {
+      placeId, kind: "flat",
+      OR: [{ flatEdgeRowA: body.row }, { flatEdgeRowB: body.row }],
+    },
+  });
+  await prisma.box.updateMany({
+    where: { placeId, kind: "flat", flatEdgeRowA: { gt: body.row } },
+    data: { flatEdgeRowA: { decrement: 1 } },
+  });
+  await prisma.box.updateMany({
+    where: { placeId, kind: "flat", flatEdgeRowB: { gt: body.row } },
+    data: { flatEdgeRowB: { decrement: 1 } },
+  });
+
   await prisma.location.deleteMany({ where: { placeId, row: body.row } });
 
   const below = await prisma.location.findMany({
@@ -230,6 +248,19 @@ async function removeRow(placeId: string, body: { row: number }) {
   }
 
   return NextResponse.json({ ok: true });
+}
+
+/** Delete all flats (kind:"flat") whose edge references a specific cell (row, col). */
+async function deleteOrphanFlats(placeId: string, row: number, col: number) {
+  await prisma.box.deleteMany({
+    where: {
+      placeId, kind: "flat",
+      OR: [
+        { flatEdgeRowA: row, flatEdgeColA: col },
+        { flatEdgeRowB: row, flatEdgeColB: col },
+      ],
+    },
+  });
 }
 
 async function resetPlan(

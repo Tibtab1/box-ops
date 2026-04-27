@@ -11,7 +11,8 @@ import {
   shadeHex,
   renderDepth,
 } from "@/lib/iso";
-import type { CellView, FlatEdgeItem } from "@/lib/types";
+import { FLAT_TYPE_LABELS } from "@/lib/types";
+import type { CellView, FlatEdgeItem, CellBoxLite, FlatType } from "@/lib/types";
 
 type Props = {
   cells: CellView[];
@@ -25,7 +26,7 @@ type Props = {
 
 type HoverInfo = {
   cellCode: string;
-  hoveredIdx: number; // which box is under the pointer
+  hoveredIdx: number;
   stack: Array<{
     id: string;
     name: string;
@@ -34,6 +35,7 @@ type HoverInfo = {
     tags: string[];
   }>;
   capacity: number;
+  nearbyFlats: Array<{ id: string; name: string; color: string; flatType: FlatType | null }>;
   sx: number;
   sy: number;
 };
@@ -220,14 +222,22 @@ export default function MapGrid3D({
   type BoxTile = {
     kind: "box";
     cell: CellView;
-    boxIdx: number;
+    box: CellBoxLite;
+    boxIdx: number;   // stack position among regular boxes (0-based)
+    isTopBox: boolean;
     depth: number;
     zBottom: number;
     zTop: number;
     colOff: number;
   };
+  type FurnitureTile = {
+    kind: "furniture";
+    cell: CellView;
+    furniture: CellBoxLite;
+    depth: number;
+  };
   type FlatTile = { kind: "flat"; flat: FlatEdgeItem; depth: number };
-  type Item = FloorTile | BoxTile | FlatTile;
+  type Item = FloorTile | BoxTile | FurnitureTile | FlatTile;
 
   // Set of "row,col" for visible cells — used by FlatSlab to resolve outer edges.
   const cellSet = useMemo(
@@ -237,9 +247,9 @@ export default function MapGrid3D({
 
   const items: Item[] = useMemo(() => {
     const acc: Item[] = [];
-    const boxHeight = 1; // one stack unit per box
-    const gap = explode * 1.5;       // vertical gap between layers
-    const spread = explode * 0.3;    // horizontal spread per stack level
+    const boxHeight = 1;
+    const gap = explode * 1.5;
+    const spread = explode * 0.3;
 
     for (const cell of visibleCells) {
       acc.push({
@@ -247,25 +257,42 @@ export default function MapGrid3D({
         cell,
         depth: renderDepth(cell.col, cell.row, 0) - 1,
       });
-      for (let i = 0; i < cell.boxes.length; i++) {
+
+      const regularBoxes = cell.boxes.filter((b) => b.kind === "box");
+      for (let i = 0; i < regularBoxes.length; i++) {
         const zBottom = i * (boxHeight + gap);
         const zTop = zBottom + boxHeight;
         const colOff = i * spread;
         acc.push({
           kind: "box",
           cell,
+          box: regularBoxes[i],
           boxIdx: i,
+          isTopBox: i === regularBoxes.length - 1,
           depth: renderDepth(cell.col, cell.row, i + 1),
           zBottom,
           zTop,
           colOff,
         });
       }
+
+      const furniture = cell.boxes.find((b) => b.kind === "furniture");
+      if (furniture) {
+        acc.push({
+          kind: "furniture",
+          cell,
+          furniture,
+          depth:
+            renderDepth(
+              cell.col + furniture.spanW - 1,
+              cell.row + furniture.spanH - 1,
+              0
+            ) + 0.5,
+        });
+      }
     }
 
     for (const f of flats) {
-      // Depth: use the "foreground" boundary of the edge so the slab renders
-      // after both adjacent floor tiles but before boxes above floor level.
       const depth =
         (Math.max(f.colA, f.colB ?? f.colA) +
           Math.max(f.rowA, f.rowB ?? f.rowA) +
@@ -467,7 +494,21 @@ export default function MapGrid3D({
                 />
               );
             }
-            const box = item.cell.boxes[item.boxIdx];
+            if (item.kind === "furniture") {
+              return (
+                <FurniturePrism
+                  key={`fur-${item.furniture.id}`}
+                  col={item.cell.col}
+                  row={item.cell.row}
+                  spanW={item.furniture.spanW}
+                  spanH={item.furniture.spanH}
+                  color={item.furniture.color}
+                  name={item.furniture.name}
+                  isSelected={selectedCode === item.cell.code}
+                />
+              );
+            }
+            const box = item.box;
             return (
               <BoxCube
                 key={`b-${box.id}`}
@@ -476,7 +517,7 @@ export default function MapGrid3D({
                 zBottom={item.zBottom}
                 zTop={item.zTop}
                 color={box.color}
-                isTop={item.boxIdx === item.cell.boxes.length - 1}
+                isTop={item.isTopBox}
                 isSelected={selectedCode === item.cell.code}
                 isHighlighted={highlightedCodes?.has(item.cell.code)}
                 isHovered={
@@ -492,23 +533,33 @@ export default function MapGrid3D({
                   setHover({
                     cellCode: item.cell.code,
                     hoveredIdx: item.boxIdx,
-                    stack: item.cell.boxes.map((b) => ({
-                      id: b.id,
-                      name: b.name,
-                      color: b.color,
-                      stackIndex: b.stackIndex,
-                      tags: b.tags,
-                    })),
+                    stack: item.cell.boxes
+                      .filter((b) => b.kind === "box")
+                      .map((b) => ({
+                        id: b.id,
+                        name: b.name,
+                        color: b.color,
+                        stackIndex: b.stackIndex,
+                        tags: b.tags,
+                      })),
                     capacity: item.cell.capacity,
+                    nearbyFlats: flats.filter(
+                      (f) =>
+                        (f.rowA === item.cell.row && f.colA === item.cell.col) ||
+                        (f.rowB === item.cell.row && f.colB === item.cell.col)
+                    ).map((f) => ({
+                      id: f.id,
+                      name: f.name,
+                      color: f.color,
+                      flatType: f.flatType,
+                    })),
                     sx,
                     sy,
                   })
                 }
                 onLeave={clearHover}
                 label={box.name}
-                topLabel={
-                  item.boxIdx === item.cell.boxes.length - 1 ? box.name : null
-                }
+                topLabel={item.isTopBox ? box.name : null}
                 cellLabel={item.boxIdx === 0 ? item.cell.code : null}
               />
             );
@@ -561,6 +612,32 @@ export default function MapGrid3D({
                 </li>
               ))}
             </ol>
+
+            {hover.nearbyFlats.length > 0 && (
+              <div className="mt-2 pt-2 border-t border-dashed border-ink/20">
+                <div className="font-mono text-[8px] uppercase tracking-[0.2em] text-ink/50 mb-1">
+                  Cadres sur arête
+                </div>
+                <ul className="space-y-0.5">
+                  {hover.nearbyFlats.map((f) => (
+                    <li key={f.id} className="flex items-center gap-1.5">
+                      <span
+                        className="w-2.5 h-2.5 border border-ink shrink-0"
+                        style={{ backgroundColor: f.color }}
+                      />
+                      <span className="font-display font-bold text-[10px] text-ink truncate flex-1">
+                        {f.name}
+                      </span>
+                      {f.flatType && (
+                        <span className="font-mono text-[8px] text-ink/50 shrink-0">
+                          {FLAT_TYPE_LABELS[f.flatType]}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         )}
 
@@ -844,6 +921,85 @@ function BoxCube({
           )}
         </polygon>
       )}
+    </g>
+  );
+}
+
+// ─── FurniturePrism ──────────────────────────────────────────────────
+// Renders a furniture item as a spanW × spanH × 1.8 rectangular block.
+function FurniturePrism({
+  col, row, spanW, spanH, color, name, isSelected,
+}: {
+  col: number; row: number;
+  spanW: number; spanH: number;
+  color: string; name: string;
+  isSelected: boolean;
+}) {
+  const H = 1.8;
+  const topFill = color;
+  const frontFill = shadeHex(color, 0.28);
+  const rightFill = shadeHex(color, 0.44);
+
+  // Top face
+  const topPts = [
+    project(col, row, H),
+    project(col + spanW, row, H),
+    project(col + spanW, row + spanH, H),
+    project(col, row + spanH, H),
+  ].map((p) => `${p.sx},${p.sy}`).join(" ");
+
+  // Front face (facing viewer: row + spanH side)
+  const frontPts = [
+    project(col, row + spanH, 0),
+    project(col + spanW, row + spanH, 0),
+    project(col + spanW, row + spanH, H),
+    project(col, row + spanH, H),
+  ].map((p) => `${p.sx},${p.sy}`).join(" ");
+
+  // Right face (col + spanW side)
+  const rightPts = [
+    project(col + spanW, row, 0),
+    project(col + spanW, row + spanH, 0),
+    project(col + spanW, row + spanH, H),
+    project(col + spanW, row, H),
+  ].map((p) => `${p.sx},${p.sy}`).join(" ");
+
+  const topCenter = project(col + spanW / 2, row + spanH / 2, H);
+  const frontCorner0 = project(col, row + spanH, 0);
+  const frontCorner2 = project(col + spanW, row + spanH, H);
+  const labelX = (frontCorner0.sx + frontCorner2.sx) / 2;
+  const labelY = (frontCorner0.sy + frontCorner2.sy) / 2;
+
+  return (
+    <g>
+      <polygon points={rightPts} fill={rightFill} stroke="var(--ink)" strokeWidth={1} />
+      <polygon points={frontPts} fill={frontFill} stroke="var(--ink)" strokeWidth={1} />
+      <polygon
+        points={topPts}
+        fill={topFill}
+        stroke="var(--ink)"
+        strokeWidth={isSelected ? 2.5 : 1}
+      />
+      {/* Name on front face */}
+      <text
+        x={labelX} y={labelY}
+        textAnchor="middle" dominantBaseline="middle"
+        fontFamily="Fraunces, serif" fontSize="8" fontWeight="700"
+        fill="rgba(255,255,255,0.95)"
+        style={{ pointerEvents: "none", userSelect: "none" }}
+      >
+        {truncate(name, 12)}
+      </text>
+      {/* Name on top face */}
+      <text
+        x={topCenter.sx} y={topCenter.sy}
+        textAnchor="middle" dominantBaseline="middle"
+        fontFamily="Fraunces, serif" fontSize="7" fontWeight="700"
+        fill="rgba(255,255,255,0.85)"
+        style={{ pointerEvents: "none", userSelect: "none" }}
+      >
+        {truncate(name, 12)}
+      </text>
     </g>
   );
 }

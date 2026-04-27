@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { parseTags } from "@/lib/types";
+import { parseTags, FLAT_TYPE_LABELS, type FlatType } from "@/lib/types";
 import { auth } from "@/auth";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -82,8 +82,10 @@ export default async function PrintPage() {
   const now = new Date().toLocaleDateString("fr-FR", {
     day: "2-digit", month: "long", year: "numeric",
   });
-  const placedCount = allBoxes.filter((b) => b.location).length;
-  const unplaced = allBoxes.length - placedCount;
+  const regularItems = allBoxes.filter((b) => b.kind !== "flat");
+  const allFlats = allBoxes.filter((b) => b.kind === "flat");
+  const placedCount = regularItems.filter((b) => b.location).length;
+  const unplaced = regularItems.length - placedCount;
 
   return (
     <div className="print-root">
@@ -103,9 +105,15 @@ export default async function PrintPage() {
             <span className="print-meta-label">Boîtes</span>
             <span className="print-meta-value">
               {placedCount}
-              <span className="print-meta-sub">/{allBoxes.length}</span>
+              <span className="print-meta-sub">/{regularItems.length}</span>
             </span>
           </div>
+          {allFlats.length > 0 && (
+            <div>
+              <span className="print-meta-label">Cadres</span>
+              <span className="print-meta-value">{allFlats.length}</span>
+            </div>
+          )}
           <div>
             <span className="print-meta-label">Rangées</span>
             <span className="print-meta-value">{rowsData.length}</span>
@@ -174,7 +182,7 @@ export default async function PrintPage() {
             </tr>
           </thead>
           <tbody>
-            {allBoxes.map((b) => (
+            {regularItems.map((b) => (
               <tr key={b.id}>
                 <td className="print-td-code">{b.location ? b.location.code : "—"}</td>
                 <td className="print-td-idx">{b.location ? `#${b.stackIndex + 1}` : ""}</td>
@@ -198,6 +206,40 @@ export default async function PrintPage() {
           </p>
         )}
       </section>
+
+      {allFlats.length > 0 && (
+        <section className="print-section print-page-break">
+          <h2 className="print-section-title">Cadres &amp; tableaux</h2>
+          <table className="print-table">
+            <thead>
+              <tr>
+                <th>Nom</th>
+                <th>Type</th>
+                <th>Dimensions</th>
+                <th>Valeur est.</th>
+                <th>Fragile</th>
+              </tr>
+            </thead>
+            <tbody>
+              {allFlats.map((f) => (
+                <tr key={f.id}>
+                  <td>
+                    <div className="print-td-name">
+                      <span className="print-swatch" style={{ backgroundColor: f.color }} aria-hidden />
+                      <span>{f.name}</span>
+                    </div>
+                    {f.description && <div className="print-td-desc">{f.description}</div>}
+                  </td>
+                  <td>{f.flatType ? FLAT_TYPE_LABELS[f.flatType as FlatType] : "—"}</td>
+                  <td>{f.widthCm && f.heightCm ? `${f.widthCm} × ${f.heightCm} cm` : "—"}</td>
+                  <td>{f.estimatedValueCents ? `${(f.estimatedValueCents / 100).toFixed(2)} €` : "—"}</td>
+                  <td>{f.isFragile ? "⚠ Oui" : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
 
       <div className="print-footer">
         BOX·OPS · {place.name} · plan généré le {now}

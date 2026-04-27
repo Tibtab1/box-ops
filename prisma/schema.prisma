@@ -166,6 +166,9 @@ model Box {
   flatType            String?               // "painting" | "photo" | "poster" | "mirror" | "other"
   isFragile           Boolean  @default(false)
   estimatedValueCents Int?                  // value in cents (e.g. 12500 = 125,00 €)
+  // Pro fields — optional, only used in stock/professional contexts
+  sku                 String?               // reference / SKU code
+  quantity            Int      @default(1)  // unit count (default 1 for personal mode)
   // v2 flat positioning: a flat is an edge between two cells (or a cell and outer space)
   flatEdgeRowA        Int?
   flatEdgeColA        Int?

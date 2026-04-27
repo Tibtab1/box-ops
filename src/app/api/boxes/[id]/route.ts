@@ -82,6 +82,8 @@ export async function GET(
     box: {
       ...box,
       tags: parseTags(box.tags),
+      sku: box.sku ?? null,
+      quantity: box.quantity,
       createdAt: box.createdAt.toISOString(),
       updatedAt: box.updatedAt.toISOString(),
     },
@@ -113,6 +115,9 @@ export async function PATCH(
   if (typeof body.photoUrl === "string" || body.photoUrl === null) data.photoUrl = body.photoUrl;
   if (Array.isArray(body.tags)) data.tags = serializeTags(body.tags);
   else if (typeof body.tags === "string") data.tags = body.tags;
+  if (typeof body.sku === "string") data.sku = body.sku.trim() || null;
+  else if (body.sku === null) data.sku = null;
+  if (typeof body.quantity === "number" && body.quantity >= 1) data.quantity = Math.round(body.quantity);
 
   // Flat-specific fields (only meaningful when box is a flat)
   if (box.kind === "flat") {

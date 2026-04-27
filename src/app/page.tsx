@@ -746,6 +746,15 @@ function ExportMenu({
           >
             🖨️ Plan PDF (imprimer)
           </a>
+          <a
+            href="/stock"
+            target="_blank"
+            rel="noopener"
+            className="block px-3 py-2 font-mono text-[11px] uppercase tracking-widest text-ink hover:bg-paper-dark"
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            📦 Inventaire stock (SKU)
+          </a>
         </div>
       )}
     </div>

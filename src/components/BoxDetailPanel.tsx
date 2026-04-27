@@ -15,6 +15,9 @@ type BoxDetail = {
   stackIndex: number;
   location: { code: string; row: number; col: number } | null;
   kind?: "box" | "furniture" | "flat";
+  // Pro fields
+  sku?: string | null;
+  quantity?: number;
   // Flat-specific
   widthCm?: number | null;
   heightCm?: number | null;
@@ -199,6 +202,28 @@ export default function BoxDetailPanel({
               #{t}
             </span>
           ))}
+        </div>
+      )}
+
+      {box.kind !== "flat" && (box.sku || (box.quantity && box.quantity > 1)) && (
+        <div className="mb-5">
+          <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-ink/60 mb-2 pb-2 border-b border-dashed border-ink/30">
+            Stock
+          </div>
+          <dl className="space-y-1.5">
+            {box.sku && (
+              <div className="flex justify-between font-mono text-[11px]">
+                <dt className="text-ink/60">Réf. / SKU</dt>
+                <dd className="font-bold tracking-wider">{box.sku}</dd>
+              </div>
+            )}
+            {box.quantity != null && box.quantity > 1 && (
+              <div className="flex justify-between font-mono text-[11px]">
+                <dt className="text-ink/60">Quantité</dt>
+                <dd className="font-bold">{box.quantity} unités</dd>
+              </div>
+            )}
+          </dl>
         </div>
       )}
 

@@ -50,6 +50,7 @@ export async function POST(req: NextRequest) {
     kind, spanW, spanH, parentId,
     widthCm, heightCm, flatType, isFragile, estimatedValueCents,
     flatEdgeRowA, flatEdgeColA, flatEdgeRowB, flatEdgeColB,
+    sku, quantity,
   }: {
     name?: string; description?: string; tags?: string[] | string;
     photoUrl?: string; color?: string; locationCode?: string | null;
@@ -65,6 +66,8 @@ export async function POST(req: NextRequest) {
     flatEdgeColA?: number | null;
     flatEdgeRowB?: number | null;
     flatEdgeColB?: number | null;
+    sku?: string | null;
+    quantity?: number;
   } = body;
 
   if (!name || !name.trim()) {
@@ -119,6 +122,9 @@ export async function POST(req: NextRequest) {
     // else: outer edge, B stays null
   }
 
+  const resolvedSku = typeof sku === "string" && sku.trim() ? sku.trim() : null;
+  const resolvedQuantity = typeof quantity === "number" && quantity >= 1 ? Math.round(quantity) : 1;
+
   // Common writable fields (no locationId / stackIndex / spanW / spanH /
   // edge coords here — set per-branch).
   const baseData = {
@@ -129,6 +135,8 @@ export async function POST(req: NextRequest) {
     color: color || "#e8602c",
     placeId,
     userId,
+    sku: resolvedSku,
+    quantity: resolvedQuantity,
     widthCm: resolvedWidthCm,
     heightCm: resolvedHeightCm,
     flatType: resolvedFlatType,

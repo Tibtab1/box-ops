@@ -59,6 +59,10 @@ export default function BoxForm({
   const [saving, setSaving] = useState(false);
   const [hydrated, setHydrated] = useState(mode.kind === "create");
 
+  // Pro fields
+  const [sku, setSku] = useState("");
+  const [quantity, setQuantity] = useState<number>(1);
+
   // ── v13: furniture support ──
   const [kind, setKind] = useState<"box" | "furniture" | "flat">(
     presetKind ?? "box"
@@ -109,6 +113,9 @@ export default function BoxForm({
           setManualColor(b.color);
         }
         setLocationCode(b.location?.code ?? "");
+        // Pro fields
+        setSku(b.sku ?? "");
+        setQuantity(typeof b.quantity === "number" && b.quantity >= 1 ? b.quantity : 1);
         // v13: load kind/span
         setKind(b.kind ?? "box");
         setSpanW(b.spanW ?? 1);
@@ -192,6 +199,8 @@ export default function BoxForm({
       tags,
       photoUrl,
       color: activeColor,
+      sku: sku.trim() || null,
+      quantity,
     };
 
     // Branch on scenario: child inside furniture / furniture on plan / flat / normal box
@@ -548,6 +557,31 @@ export default function BoxForm({
           placeholder="livres, fragile, archive"
         />
       </Field>
+
+      {kind !== "flat" && (
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Réf. / SKU (optionnel)">
+            <input
+              className="input-field font-mono"
+              value={sku}
+              onChange={(e) => setSku(e.target.value)}
+              placeholder="REF-001"
+              maxLength={64}
+            />
+          </Field>
+          <Field label="Quantité">
+            <input
+              type="number"
+              min={1}
+              max={99999}
+              step={1}
+              className="input-field"
+              value={quantity}
+              onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+            />
+          </Field>
+        </div>
+      )}
 
       <Field label="Photo (optionnelle)">
         <div className="space-y-2">

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import MapGrid from "@/components/MapGrid";
 import MapGrid3D from "@/components/MapGrid3D";
@@ -53,6 +54,7 @@ type RightPanel =
   | { kind: "furniture-detail"; boxId: string };
 
 export default function HomePage() {
+  const router = useRouter();
   const [cells, setCells] = useState<CellView[]>([]);
   const [boxes, setBoxes] = useState<BoxWithLoc[]>([]);
   const [flats, setFlats] = useState<FlatEdgeItem[]>([]);
@@ -97,15 +99,13 @@ export default function HomePage() {
     setViewMode(readStoredViewMode());
   }, []);
 
-  // Bootstrap: on first login the user has no locations yet; ask the server
-  // to create a starter plan. Idempotent, so safe to call on every mount.
+  // Bootstrap: redirect new users (no places yet) to onboarding.
   useEffect(() => {
     fetch("/api/bootstrap", { method: "POST" })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (data?.created) {
-          // Refresh to show the new plan
-          refresh();
+        if (data && !data.hasPlaces) {
+          router.replace("/onboarding");
         }
       })
       .catch(() => {});

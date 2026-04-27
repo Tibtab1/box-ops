@@ -20,6 +20,8 @@ type Props = {
   selectedCode?: string | null;
   highlightedCodes?: Set<string>;
   onCellClick?: (cell: CellView) => void;
+  /** Fired when a box cube is clicked — passes the box id, for 3D→inventory link */
+  onBoxFocused?: (boxId: string) => void;
   /** If true, clicks on empty/aisle cells do nothing. Only box cells remain clickable. */
   readOnly?: boolean;
 };
@@ -46,6 +48,7 @@ export default function MapGrid3D({
   selectedCode,
   highlightedCodes,
   onCellClick,
+  onBoxFocused,
   readOnly,
 }: Props) {
   // ─── Grid bounds ──────────────────────────────────────────────────
@@ -63,6 +66,7 @@ export default function MapGrid3D({
   // ─── Explode & isolation state ────────────────────────────────────
   const [explode, setExplode] = useState(0); // 0 = compact, 1 = fully exploded
   const [isolatedRow, setIsolatedRow] = useState<number | null>(null);
+  const [xray, setXray] = useState(false);
 
   // List of unique row numbers for the isolation picker
   const rowNumbers = useMemo(
@@ -368,6 +372,18 @@ export default function MapGrid3D({
           </span>
         </label>
 
+        {/* X-ray toggle */}
+        <button
+          onClick={() => setXray((v) => !v)}
+          className={clsx(
+            "font-mono text-[10px] uppercase tracking-widest px-2.5 py-1.5 border-2 transition-all",
+            xray ? "bg-blueprint text-paper border-ink shadow-stamp" : "border-ink/30 text-ink/70 hover:border-ink"
+          )}
+          title="Mode rayon X : voir à travers les meubles"
+        >
+          ✦ Rayon X
+        </button>
+
         {/* Row isolator */}
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink/70">
@@ -502,9 +518,11 @@ export default function MapGrid3D({
                   row={item.cell.row}
                   spanW={item.furniture.spanW}
                   spanH={item.furniture.spanH}
+                  heightFactor={(item.furniture as CellBoxLite & { heightFactor?: number }).heightFactor ?? 1}
                   color={item.furniture.color}
                   name={item.furniture.name}
                   isSelected={selectedCode === item.cell.code}
+                  xray={xray}
                 />
               );
             }
@@ -527,6 +545,7 @@ export default function MapGrid3D({
                 onClick={(e) => {
                   if (dragState.current && dragState.current.movedPx > 5) return;
                   e.stopPropagation();
+                  onBoxFocused?.(box.id);
                   onCellClick?.(item.cell);
                 }}
                 onHover={(sx, sy) =>
@@ -926,16 +945,19 @@ function BoxCube({
 }
 
 // ─── FurniturePrism ──────────────────────────────────────────────────
-// Renders a furniture item as a spanW × spanH × 1.8 rectangular block.
+// Renders a furniture item as a spanW × spanH × H rectangular block.
 function FurniturePrism({
-  col, row, spanW, spanH, color, name, isSelected,
+  col, row, spanW, spanH, heightFactor = 1, color, name, isSelected, xray = false,
 }: {
   col: number; row: number;
   spanW: number; spanH: number;
+  heightFactor?: number;
   color: string; name: string;
   isSelected: boolean;
+  xray?: boolean;
 }) {
-  const H = 1.8;
+  const H = 1.8 * heightFactor;
+  const opacity = xray ? 0.35 : 1;
   const topFill = color;
   const frontFill = shadeHex(color, 0.28);
   const rightFill = shadeHex(color, 0.44);
@@ -971,7 +993,7 @@ function FurniturePrism({
   const labelY = (frontCorner0.sy + frontCorner2.sy) / 2;
 
   return (
-    <g>
+    <g opacity={opacity}>
       <polygon points={rightPts} fill={rightFill} stroke="var(--ink)" strokeWidth={1} />
       <polygon points={frontPts} fill={frontFill} stroke="var(--ink)" strokeWidth={1} />
       <polygon

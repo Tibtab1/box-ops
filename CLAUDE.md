@@ -54,6 +54,10 @@ SaaS de gestion d'espace de stockage personnel. Plan 2D/3D où l'utilisateur pla
 
 \- Compression d'images, photos sur boîtes
 
+\- Champs pro : SKU (référence) et quantité sur boîtes/meubles
+
+\- Page /stock : inventaire groupé par SKU avec totaux de quantités
+
 
 
 \## Modèle cadres (kind: "flat") — important

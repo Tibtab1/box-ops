@@ -27,6 +27,7 @@ export async function GET() {
       kind: b.kind,
       flatType: b.flatType,
       isFragile: b.isFragile,
+      isFavorite: b.isFavorite,
       flatEdgeRowA: b.flatEdgeRowA,
       flatEdgeColA: b.flatEdgeColA,
       flatEdgeRowB: b.flatEdgeRowB,
@@ -124,6 +125,8 @@ export async function POST(req: NextRequest) {
 
   const resolvedSku = typeof sku === "string" && sku.trim() ? sku.trim() : null;
   const resolvedQuantity = typeof quantity === "number" && quantity >= 1 ? Math.round(quantity) : 1;
+  // isFavorite and heightFactor from body (ignored in create, settable via PATCH)
+
 
   // Common writable fields (no locationId / stackIndex / spanW / spanH /
   // edge coords here — set per-branch).

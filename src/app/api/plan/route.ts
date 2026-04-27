@@ -20,13 +20,13 @@ export async function POST(req: NextRequest) {
     case "add_cell_left":
       return addCellLeft(placeId, userId, body);
     case "remove_cell_right":
-      return removeCellRight(placeId, body);
+      return removeCellRight(placeId, userId, body);
     case "remove_cell_left":
-      return removeCellLeft(placeId, body);
+      return removeCellLeft(placeId, userId, body);
     case "add_row":
       return addRow(placeId, userId, body);
     case "remove_row":
-      return removeRow(placeId, body);
+      return removeRow(placeId, userId, body);
     case "reset":
       return resetPlan(placeId, userId, body);
     default:
@@ -62,6 +62,10 @@ async function nextFreeSlot(placeId: string, aisle: string): Promise<number> {
   return s;
 }
 
+async function logPlan(placeId: string, userId: string, action: string, detail: object) {
+  await prisma.planLog.create({ data: { placeId, userId, action, detail } });
+}
+
 async function addCellRight(
   placeId: string,
   userId: string,
@@ -81,6 +85,7 @@ async function addCellRight(
       type, capacity: 20, enabled: true,
     },
   });
+  await logPlan(placeId, userId, "add_cell_right", { row: body.row, col: newCol });
   return NextResponse.json({ ok: true });
 }
 
@@ -105,6 +110,7 @@ async function addCellLeft(
         type, capacity: 20, enabled: true,
       },
     });
+    await logPlan(placeId, userId, "add_cell_left", { row: body.row, col: info.minCol - 1 });
     return NextResponse.json({ ok: true });
   }
 
@@ -129,10 +135,11 @@ async function addCellLeft(
       type, capacity: 20, enabled: true,
     },
   });
+  await logPlan(placeId, userId, "add_cell_left", { row: body.row, col: 0, shifted: true });
   return NextResponse.json({ ok: true, shifted: true });
 }
 
-async function removeCellRight(placeId: string, body: { row: number }) {
+async function removeCellRight(placeId: string, userId: string, body: { row: number }) {
   const info = await rowInfo(placeId, body.row);
   if (!info) return NextResponse.json({ error: "Rangée inexistante." }, { status: 404 });
   if (info.cells.length <= 1) {
@@ -145,10 +152,11 @@ async function removeCellRight(placeId: string, body: { row: number }) {
   }
   await deleteOrphanFlats(placeId, last.row, last.col);
   await prisma.location.delete({ where: { id: last.id } });
+  await logPlan(placeId, userId, "remove_cell_right", { row: body.row, col: last.col });
   return NextResponse.json({ ok: true });
 }
 
-async function removeCellLeft(placeId: string, body: { row: number }) {
+async function removeCellLeft(placeId: string, userId: string, body: { row: number }) {
   const info = await rowInfo(placeId, body.row);
   if (!info) return NextResponse.json({ error: "Rangée inexistante." }, { status: 404 });
   if (info.cells.length <= 1) {
@@ -161,6 +169,7 @@ async function removeCellLeft(placeId: string, body: { row: number }) {
   }
   await deleteOrphanFlats(placeId, first.row, first.col);
   await prisma.location.delete({ where: { id: first.id } });
+  await logPlan(placeId, userId, "remove_cell_left", { row: body.row, col: first.col });
   return NextResponse.json({ ok: true });
 }
 
@@ -192,10 +201,11 @@ async function addRow(
       },
     });
   }
+  await logPlan(placeId, userId, "add_row", { row: newRow, cells });
   return NextResponse.json({ ok: true, row: newRow, aisle });
 }
 
-async function removeRow(placeId: string, body: { row: number }) {
+async function removeRow(placeId: string, userId: string, body: { row: number }) {
   if (typeof body.row !== "number") {
     return NextResponse.json({ error: "row manquant." }, { status: 400 });
   }
@@ -227,6 +237,7 @@ async function removeRow(placeId: string, body: { row: number }) {
     data: { flatEdgeRowB: { decrement: 1 } },
   });
 
+  await logPlan(placeId, userId, "remove_row", { row: body.row });
   await prisma.location.deleteMany({ where: { placeId, row: body.row } });
 
   const below = await prisma.location.findMany({
@@ -265,6 +276,7 @@ async function resetPlan(
   const rows = Math.max(1, Math.min(30, body.rows ?? 3));
   const cells = Math.max(1, Math.min(30, body.cells ?? 4));
 
+  await logPlan(placeId, userId, "reset", { rows, cells });
   await prisma.box.deleteMany({ where: { placeId } });
   await prisma.location.deleteMany({ where: { placeId } });
 

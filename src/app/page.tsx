@@ -33,6 +33,10 @@ type BoxWithLoc = {
   tags: string[];
   location: { code: string; row: number; col: number } | null;
   updatedAt: string;
+  kind?: "box" | "furniture" | "flat";
+  flatType?: "painting" | "photo" | "poster" | "mirror" | "other" | null;
+  isFragile?: boolean;
+  isFavorite?: boolean;
 };
 
 type Tab = "map" | "inventory";
@@ -51,6 +55,8 @@ export default function HomePage() {
   const [cells, setCells] = useState<CellView[]>([]);
   const [boxes, setBoxes] = useState<BoxWithLoc[]>([]);
   const [flats, setFlats] = useState<FlatEdgeItem[]>([]);
+  const [splitView, setSplitView] = useState(false);
+  const [highlightedBoxId, setHighlightedBoxId] = useState<string | null>(null);
   // When the user clicks "+ Ajouter Cadre", we enter "placing flat" mode:
   // the plan shows clickable hotspots on each edge. When the user clicks an
   // edge, we open BoxForm in flat-creation mode pre-filled with that edge.
@@ -155,13 +161,23 @@ export default function HomePage() {
         : [];
 
       const newCells = safeCells;
-      const mappedBoxes = safeBoxes.map((b) => ({
+      const mappedBoxes = safeBoxes.map((b: {
+        id: string; name: string; color: string; tags: string[];
+        location: { code: string; row: number; col: number } | null;
+        updatedAt: string; kind?: string;
+        flatType?: "painting" | "photo" | "poster" | "mirror" | "other" | null;
+        isFragile?: boolean; isFavorite?: boolean;
+      }) => ({
         id: b.id,
         name: b.name,
         color: b.color,
         tags: b.tags,
         location: b.location,
         updatedAt: b.updatedAt,
+        kind: (b.kind as "box" | "furniture" | "flat" | undefined),
+        flatType: b.flatType,
+        isFragile: b.isFragile,
+        isFavorite: b.isFavorite,
       }));
 
       const newCellsFp = cellsFingerprint(newCells);
@@ -249,6 +265,11 @@ export default function HomePage() {
     }
     return null;
   }, [rightPanel, cells]);
+
+  const allTags = useMemo(
+    () => [...new Set(boxes.flatMap((b) => b.tags))].sort(),
+    [boxes]
+  );
 
   const stats = useMemo(() => {
     const storageCells = cells.filter(
@@ -345,9 +366,30 @@ export default function HomePage() {
     [refresh]
   );
 
-  // Drag & drop: move the top box of one cell to another cell
+  // Drag & drop: move the top box of one cell to another cell (optimistic UI)
   const handleBoxDrop = useCallback(
     async (boxId: string, targetCode: string) => {
+      // Optimistic: immediately move the box in local state
+      setCells((prev) => {
+        let movedBox: (typeof prev[0]["boxes"][0]) | undefined;
+        const step1 = prev.map((cell) => {
+          const idx = cell.boxes.findIndex((b) => b.id === boxId);
+          if (idx !== -1) {
+            movedBox = cell.boxes[idx];
+            return { ...cell, boxes: cell.boxes.filter((b) => b.id !== boxId) };
+          }
+          return cell;
+        });
+        if (!movedBox) return prev;
+        const box = movedBox;
+        return step1.map((cell) => {
+          if (cell.code === targetCode) {
+            return { ...cell, boxes: [...cell.boxes, { ...box, stackIndex: cell.boxes.length }] };
+          }
+          return cell;
+        });
+      });
+
       const res = await fetch(`/api/boxes/${boxId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -356,6 +398,7 @@ export default function HomePage() {
       const data = await res.json();
       if (!res.ok) {
         pushToast("error", data.error ?? "Déplacement impossible.");
+        await refresh(); // revert optimistic update
         return;
       }
       pushToast("success", `Déplacée vers ${targetCode}`);
@@ -499,7 +542,17 @@ export default function HomePage() {
             onResultsChange={setHighlighted}
           />
           <div className="flex items-center gap-2 flex-wrap">
-            <TabSwitch current={tab} onChange={setTab} />
+            <TabSwitch current={tab} onChange={(t) => { setTab(t); setSplitView(false); }} />
+            <button
+              onClick={() => setSplitView((v) => !v)}
+              className={clsx(
+                "font-mono text-[10px] uppercase tracking-widest px-2.5 py-1.5 border-2 border-ink transition-colors whitespace-nowrap",
+                splitView ? "bg-ink text-paper" : "bg-paper text-ink hover:bg-paper-dark"
+              )}
+              title="Afficher le plan et l'inventaire côte-à-côte"
+            >
+              ⊞ Vue partagée
+            </button>
             {tab === "map" && (
               <ViewToggle
                 mode={viewMode}
@@ -589,93 +642,112 @@ export default function HomePage() {
               : "grid-cols-1 lg:grid-cols-[minmax(0,1fr)_380px]"
           )}
         >
-          <div className="min-w-0 space-y-5" id="grid-root">
+          <div
+            className={clsx(
+              "min-w-0",
+              splitView && !loading
+                ? "grid grid-cols-1 lg:grid-cols-2 gap-5 items-start"
+                : "space-y-5"
+            )}
+            id="grid-root"
+          >
             {loading ? (
               <div className="panel p-10 font-mono text-xs uppercase tracking-widest text-ink/50 text-center">
                 Chargement du plan…
               </div>
-            ) : tab === "map" ? (
-              <>
-                {viewMode === "2d" ? (
-                  <MapGrid
-                    cells={cells}
-                    flats={flats}
-                    selectedCode={focusedCode}
-                    highlightedCodes={highlighted}
-                    measureEndpoints={{
-                      a: boxes.find((b) => b.id === measure.a)?.location?.code,
-                      b: boxes.find((b) => b.id === measure.b)?.location?.code,
-                    }}
-                    onCellClick={handleCellClick}
-                    onFurnitureClick={handleFurnitureClick}
-                    placementMode={placementMode}
-                    placingFlat={placingFlat}
-                    onEdgeClick={(edge) => {
-                      setPendingFlatEdge(edge);
-                      setPlacingFlat(false);
-                      setRightPanel({ kind: "create", presetCode: null });
-                    }}
-                    onFlatClick={(flatId) => {
-                      setRightPanel({ kind: "detail", boxId: flatId });
-                    }}
-                    editMode={editMode}
-                    onRowMutate={editMode ? handleRowMutate : undefined}
-                    onBoxDrop={handleBoxDrop}
-                    onFurnitureDrop={handleFurnitureDrop}
-                    onFlatDrop={handleFlatDrop}
-                    dragEnabled={
-                      !editMode &&
-                      !placementMode &&
-                      !placingFlat &&
-                      (activeRole === "owner" ||
-                        activeRole === "admin" ||
-                        activeRole === "editor")
-                    }
-                  />
-                ) : (
-                  <MapGrid3D
-                    cells={cells}
-                    flats={flats}
-                    selectedCode={focusedCode}
-                    highlightedCodes={highlighted}
-                    onCellClick={handleCellClick}
-                    readOnly
-                  />
-                )}
-
-                {mutateError && (
-                  <div className="panel bg-safety text-paper border-ink p-3 font-mono text-[11px] uppercase tracking-[0.2em] text-center">
-                    {mutateError}
-                  </div>
-                )}
-                {editMode && !mutateError && viewMode === "2d" && (
-                  <div className="panel bg-blueprint text-paper border-ink p-3 font-mono text-[11px] uppercase tracking-[0.2em] text-center">
-                    ✎ Cliquez une cellule pour la modifier · utilisez + et − pour ajuster chaque rangée
-                  </div>
-                )}
-                {placementMode && (
-                  <div className="panel bg-blueprint text-paper border-ink p-3 font-mono text-[11px] uppercase tracking-[0.2em] text-center">
-                    Cliquez une cellule libre ou avec place disponible pour y placer la nouvelle boîte.
-                  </div>
-                )}
-                {!editMode && viewMode === "2d" && (
-                  <DistanceMeter
-                    boxes={boxes}
-                    endpoints={measure}
-                    onEndpointsChange={setMeasure}
-                  />
-                )}
-              </>
             ) : (
-              <InventoryList
-                boxes={boxes}
-                onOpenBox={(id) => {
-                  const b = boxes.find((x) => x.id === id);
-                  setRightPanel({ kind: "detail", boxId: id });
-                  setFocusedCode(b?.location?.code ?? null);
-                  setTab("map");
-                }}
-              />
+              <>
+                {/* Map pane — hidden via CSS when on inventory tab and not in split view */}
+                <div className={clsx("space-y-5", !splitView && tab !== "map" && "hidden")}>
+                  {viewMode === "2d" ? (
+                    <MapGrid
+                      cells={cells}
+                      flats={flats}
+                      selectedCode={focusedCode}
+                      highlightedCodes={highlighted}
+                      measureEndpoints={{
+                        a: boxes.find((b) => b.id === measure.a)?.location?.code,
+                        b: boxes.find((b) => b.id === measure.b)?.location?.code,
+                      }}
+                      onCellClick={handleCellClick}
+                      onFurnitureClick={handleFurnitureClick}
+                      placementMode={placementMode}
+                      placingFlat={placingFlat}
+                      onEdgeClick={(edge) => {
+                        setPendingFlatEdge(edge);
+                        setPlacingFlat(false);
+                        setRightPanel({ kind: "create", presetCode: null });
+                      }}
+                      onFlatClick={(flatId) => {
+                        setRightPanel({ kind: "detail", boxId: flatId });
+                      }}
+                      editMode={editMode}
+                      onRowMutate={editMode ? handleRowMutate : undefined}
+                      onBoxDrop={handleBoxDrop}
+                      onFurnitureDrop={handleFurnitureDrop}
+                      onFlatDrop={handleFlatDrop}
+                      dragEnabled={
+                        !editMode &&
+                        !placementMode &&
+                        !placingFlat &&
+                        (activeRole === "owner" ||
+                          activeRole === "admin" ||
+                          activeRole === "editor")
+                      }
+                    />
+                  ) : (
+                    <MapGrid3D
+                      cells={cells}
+                      flats={flats}
+                      selectedCode={focusedCode}
+                      highlightedCodes={highlighted}
+                      onCellClick={handleCellClick}
+                      onBoxFocused={(boxId) => {
+                        setHighlightedBoxId(boxId);
+                        if (!splitView) setTab("inventory");
+                      }}
+                      readOnly
+                    />
+                  )}
+
+                  {mutateError && (
+                    <div className="panel bg-safety text-paper border-ink p-3 font-mono text-[11px] uppercase tracking-[0.2em] text-center">
+                      {mutateError}
+                    </div>
+                  )}
+                  {editMode && !mutateError && viewMode === "2d" && (
+                    <div className="panel bg-blueprint text-paper border-ink p-3 font-mono text-[11px] uppercase tracking-[0.2em] text-center">
+                      ✎ Cliquez une cellule pour la modifier · utilisez + et − pour ajuster chaque rangée
+                    </div>
+                  )}
+                  {placementMode && (
+                    <div className="panel bg-blueprint text-paper border-ink p-3 font-mono text-[11px] uppercase tracking-[0.2em] text-center">
+                      Cliquez une cellule libre ou avec place disponible pour y placer la nouvelle boîte.
+                    </div>
+                  )}
+                  {!editMode && viewMode === "2d" && (
+                    <DistanceMeter
+                      boxes={boxes}
+                      endpoints={measure}
+                      onEndpointsChange={setMeasure}
+                    />
+                  )}
+                </div>
+
+                {/* Inventory pane — hidden via CSS when on map tab and not in split view */}
+                <div className={clsx(!splitView && tab !== "inventory" && "hidden")}>
+                  <InventoryList
+                    boxes={boxes}
+                    highlightedId={highlightedBoxId}
+                    onOpenBox={(id) => {
+                      const b = boxes.find((x) => x.id === id);
+                      setRightPanel({ kind: "detail", boxId: id });
+                      setFocusedCode(b?.location?.code ?? null);
+                      if (!splitView) setTab("map");
+                    }}
+                  />
+                </div>
+              </>
             )}
           </div>
 
@@ -689,6 +761,7 @@ export default function HomePage() {
             setPanel={setRightPanel}
             setFocusedCode={setFocusedCode}
             boxes={boxes}
+            allTags={allTags}
             onSaved={handleSaved}
             readOnly={isReadOnly3D}
             pendingFlatEdge={pendingFlatEdge}
@@ -777,6 +850,7 @@ function RightPanel(props: {
   setPanel: (p: RightPanel) => void;
   setFocusedCode: (c: string | null) => void;
   boxes: BoxWithLoc[];
+  allTags: string[];
   onSaved: (id: string) => void;
   readOnly: boolean;
   /** When set, the next "create" form should be a flat with this edge. */
@@ -793,6 +867,7 @@ function RightPanel(props: {
     setPanel,
     setFocusedCode,
     boxes,
+    allTags,
     onSaved,
     readOnly,
     pendingFlatEdge,
@@ -866,6 +941,7 @@ function RightPanel(props: {
         <BoxForm
           mode={{ kind: "create" }}
           locations={locationsForForm}
+          allTags={allTags}
           presetLocationCode={panel.presetCode}
           presetKind={pendingFlatEdge ? "flat" : undefined}
           presetFlatEdge={pendingFlatEdge}
@@ -921,6 +997,7 @@ function RightPanel(props: {
         <BoxForm
           mode={{ kind: "edit", boxId: panel.boxId }}
           locations={locationsForForm}
+          allTags={allTags}
           onSaved={onSaved}
           onCancel={() =>
             setPanel({ kind: "detail", boxId: panel.boxId })

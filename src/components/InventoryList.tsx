@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 
 type BoxRow = {
@@ -13,6 +13,7 @@ type BoxRow = {
   kind?: "box" | "furniture" | "flat";
   flatType?: "painting" | "photo" | "poster" | "mirror" | "other" | null;
   isFragile?: boolean;
+  isFavorite?: boolean;
 };
 
 type SortMode = "recent" | "alpha" | "location";
@@ -22,16 +23,26 @@ type KindFilter = "all" | "box" | "flat" | "furniture";
 type Props = {
   boxes: BoxRow[];
   onOpenBox: (id: string) => void;
+  highlightedId?: string | null;
 };
 
-export default function InventoryList({ boxes, onOpenBox }: Props) {
+export default function InventoryList({ boxes, onOpenBox, highlightedId }: Props) {
   const [query, setQuery] = useState("");
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [selectedColor, setSelectedColor] = useState<string | null>(null);
   const [placement, setPlacement] = useState<PlacementFilter>("all");
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [sort, setSort] = useState<SortMode>("recent");
   const [showFilters, setShowFilters] = useState(false);
+  const highlightRef = useRef<HTMLLIElement | null>(null);
+
+  // Scroll to highlighted item when highlightedId changes
+  useEffect(() => {
+    if (highlightedId && highlightRef.current) {
+      highlightRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [highlightedId]);
 
   // Collect all tags and colors actually present in the data
   const allTags = useMemo(() => {
@@ -59,6 +70,7 @@ export default function InventoryList({ boxes, onOpenBox }: Props) {
         const k = b.kind ?? "box";
         if (k !== kindFilter) return false;
       }
+      if (favoritesOnly && !b.isFavorite) return false;
       if (selectedColor && b.color !== selectedColor) return false;
       if (selectedTags.size > 0) {
         for (const t of selectedTags) if (!b.tags.includes(t)) return false;
@@ -95,7 +107,8 @@ export default function InventoryList({ boxes, onOpenBox }: Props) {
   const activeFilterCount =
     (selectedTags.size > 0 ? 1 : 0) +
     (selectedColor ? 1 : 0) +
-    (placement !== "all" ? 1 : 0);
+    (placement !== "all" ? 1 : 0) +
+    (favoritesOnly ? 1 : 0);
 
   function toggleTag(tag: string) {
     const next = new Set(selectedTags);
@@ -109,6 +122,7 @@ export default function InventoryList({ boxes, onOpenBox }: Props) {
     setSelectedTags(new Set());
     setSelectedColor(null);
     setPlacement("all");
+    setFavoritesOnly(false);
   }
 
   return (
@@ -127,6 +141,16 @@ export default function InventoryList({ boxes, onOpenBox }: Props) {
           </h2>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setFavoritesOnly(!favoritesOnly)}
+            className={clsx(
+              "font-mono text-[10px] uppercase tracking-widest px-2.5 py-1.5 border-2 border-ink transition-colors",
+              favoritesOnly ? "bg-ink text-paper" : "bg-paper text-ink hover:bg-paper-dark"
+            )}
+            title="Afficher uniquement les favoris"
+          >
+            ★ Favoris
+          </button>
           <select
             value={sort}
             onChange={(e) => setSort(e.target.value as SortMode)}
@@ -300,55 +324,67 @@ export default function InventoryList({ boxes, onOpenBox }: Props) {
         </div>
       ) : (
         <ul className="space-y-1.5 max-h-[520px] overflow-y-auto pr-1">
-          {filtered.map((b) => (
-            <li key={b.id}>
-              <button
-                type="button"
-                onClick={() => onOpenBox(b.id)}
-                className="w-full flex items-center gap-2.5 p-2 border-2 border-ink shadow-stamp text-left transition-all hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-stamp-lg"
-                style={{ backgroundColor: b.color }}
+          {filtered.map((b) => {
+            const isHighlighted = b.id === highlightedId;
+            return (
+              <li
+                key={b.id}
+                ref={isHighlighted ? highlightRef : null}
               >
-                <span
-                  className="font-mono text-[9px] uppercase tracking-widest bg-paper/95 text-ink px-1.5 py-0.5 border border-ink shrink-0"
-                  title={b.location?.code ?? "Sans emplacement"}
+                <button
+                  type="button"
+                  onClick={() => onOpenBox(b.id)}
+                  className={clsx(
+                    "w-full flex items-center gap-2.5 p-2 border-2 shadow-stamp text-left transition-all hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-stamp-lg",
+                    isHighlighted ? "border-safety ring-2 ring-safety" : "border-ink"
+                  )}
+                  style={{ backgroundColor: b.color }}
                 >
-                  {b.location?.code ?? "·"}
-                </span>
-                <span className="text-base shrink-0" aria-hidden>
-                  {b.kind === "flat"
-                    ? b.flatType === "painting"
-                      ? "🎨"
-                      : b.flatType === "photo"
-                      ? "📷"
-                      : b.flatType === "poster"
-                      ? "📜"
-                      : b.flatType === "mirror"
-                      ? "🪞"
-                      : "🖼"
-                    : b.kind === "furniture"
-                    ? "🪑"
-                    : "📦"}
-                </span>
-                <span className="font-display font-bold text-paper flex-1 truncate">
-                  {b.name}
-                </span>
-                {b.kind === "flat" && b.isFragile && (
+                  {b.isFavorite && (
+                    <span className="text-yellow-300 shrink-0 text-sm leading-none" title="Favori">★</span>
+                  )}
                   <span
-                    className="font-mono text-[8px] uppercase tracking-widest text-paper bg-safety/80 px-1 py-0.5 border border-paper/40 shrink-0"
-                    title="Fragile"
+                    className="font-mono text-[9px] uppercase tracking-widest bg-paper/95 text-ink px-1.5 py-0.5 border border-ink shrink-0"
+                    title={b.location?.code ?? "Sans emplacement"}
                   >
-                    ⚠
+                    {b.location?.code ?? "·"}
                   </span>
-                )}
-                {b.tags.length > 0 && (
-                  <span className="font-mono text-[9px] text-paper/80 truncate shrink-0 max-w-[40%]">
-                    {b.tags.slice(0, 3).map((t) => `#${t}`).join(" ")}
-                    {b.tags.length > 3 && ` +${b.tags.length - 3}`}
+                  <span className="text-base shrink-0" aria-hidden>
+                    {b.kind === "flat"
+                      ? b.flatType === "painting"
+                        ? "🎨"
+                        : b.flatType === "photo"
+                        ? "📷"
+                        : b.flatType === "poster"
+                        ? "📜"
+                        : b.flatType === "mirror"
+                        ? "🪞"
+                        : "🖼"
+                      : b.kind === "furniture"
+                      ? "🪑"
+                      : "📦"}
                   </span>
-                )}
-              </button>
-            </li>
-          ))}
+                  <span className="font-display font-bold text-paper flex-1 truncate">
+                    {b.name}
+                  </span>
+                  {b.kind === "flat" && b.isFragile && (
+                    <span
+                      className="font-mono text-[8px] uppercase tracking-widest text-paper bg-safety/80 px-1 py-0.5 border border-paper/40 shrink-0"
+                      title="Fragile"
+                    >
+                      ⚠
+                    </span>
+                  )}
+                  {b.tags.length > 0 && (
+                    <span className="font-mono text-[9px] text-paper/80 truncate shrink-0 max-w-[40%]">
+                      {b.tags.slice(0, 3).map((t) => `#${t}`).join(" ")}
+                      {b.tags.length > 3 && ` +${b.tags.length - 3}`}
+                    </span>
+                  )}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

@@ -84,6 +84,8 @@ export async function GET(
       tags: parseTags(box.tags),
       sku: box.sku ?? null,
       quantity: box.quantity,
+      isFavorite: box.isFavorite,
+      heightFactor: box.heightFactor,
       createdAt: box.createdAt.toISOString(),
       updatedAt: box.updatedAt.toISOString(),
     },
@@ -118,6 +120,10 @@ export async function PATCH(
   if (typeof body.sku === "string") data.sku = body.sku.trim() || null;
   else if (body.sku === null) data.sku = null;
   if (typeof body.quantity === "number" && body.quantity >= 1) data.quantity = Math.round(body.quantity);
+  if (typeof body.isFavorite === "boolean") data.isFavorite = body.isFavorite;
+  if (typeof body.heightFactor === "number" && body.heightFactor >= 1 && body.heightFactor <= 3) {
+    data.heightFactor = Math.round(body.heightFactor);
+  }
 
   // Flat-specific fields (only meaningful when box is a flat)
   if (box.kind === "flat") {

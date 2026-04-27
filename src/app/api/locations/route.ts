@@ -48,6 +48,7 @@ export async function GET() {
       kind: b.kind,
       spanW: b.spanW,
       spanH: b.spanH,
+      heightFactor: b.heightFactor,
       flatType: b.flatType,
       isFragile: b.isFragile,
     })),

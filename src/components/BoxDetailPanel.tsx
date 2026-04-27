@@ -15,7 +15,10 @@ type BoxDetail = {
   stackIndex: number;
   location: { code: string; row: number; col: number } | null;
   kind?: "box" | "furniture" | "flat";
+  spanW?: number;
+  spanH?: number;
   // Pro fields
+  isFavorite?: boolean;
   sku?: string | null;
   quantity?: number;
   // Flat-specific
@@ -103,6 +106,26 @@ export default function BoxDetailPanel({
     onDeleted();
   }
 
+  async function toggleFavorite() {
+    if (!box) return;
+    await fetch(`/api/boxes/${box.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isFavorite: !box.isFavorite }),
+    });
+    await load();
+  }
+
+  async function rotateFurniture() {
+    if (!box || box.kind !== "furniture") return;
+    const res = await fetch(`/api/boxes/${box.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ spanW: box.spanH ?? 1, spanH: box.spanW ?? 1 }),
+    });
+    if (res.ok) await load();
+  }
+
   async function reorder(direction: "up" | "down") {
     if (!box) return;
     await fetch(`/api/boxes/${box.id}/reorder`, {
@@ -147,13 +170,38 @@ export default function BoxDetailPanel({
             </h3>
           </div>
         </div>
-        <button
-          onClick={onClose}
-          className="btn-ghost !px-2.5 !py-1.5 shrink-0"
-          aria-label="Fermer"
-        >
-          ✕
-        </button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {box.kind !== "flat" && (
+            <button
+              onClick={toggleFavorite}
+              className={clsx(
+                "font-mono text-sm px-2 py-1.5 border-2 border-ink transition-colors",
+                box.isFavorite
+                  ? "bg-yellow-400 text-ink"
+                  : "bg-paper text-ink/50 hover:text-ink"
+              )}
+              title={box.isFavorite ? "Retirer des favoris" : "Ajouter aux favoris"}
+            >
+              {box.isFavorite ? "★" : "☆"}
+            </button>
+          )}
+          {box.kind === "furniture" && !readOnly && (
+            <button
+              onClick={rotateFurniture}
+              className="font-mono text-xs px-2 py-1.5 border-2 border-ink bg-paper hover:bg-paper-dark transition-colors"
+              title={`Rotation 90° (${box.spanW}×${box.spanH} → ${box.spanH}×${box.spanW})`}
+            >
+              ↻
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            className="btn-ghost !px-2.5 !py-1.5"
+            aria-label="Fermer"
+          >
+            ✕
+          </button>
+        </div>
       </div>
 
       {box.kind === "flat" ? (

@@ -31,6 +31,8 @@ type Props = {
     rowB: number | null;
     colB: number | null;
   } | null;
+  /** All tags currently used in this place — for autocomplete suggestions */
+  allTags?: string[];
   onSaved: (boxId: string) => void;
   onCancel: () => void;
 };
@@ -42,6 +44,7 @@ export default function BoxForm({
   parentFurnitureId,
   presetKind,
   presetFlatEdge,
+  allTags = [],
   onSaved,
   onCancel,
 }: Props) {
@@ -62,6 +65,10 @@ export default function BoxForm({
   // Pro fields
   const [sku, setSku] = useState("");
   const [quantity, setQuantity] = useState<number>(1);
+  const [heightFactor, setHeightFactor] = useState<number>(1);
+
+  // Tag suggestions state
+  const [tagSuggestions, setTagSuggestions] = useState<string[]>([]);
 
   // ── v13: furniture support ──
   const [kind, setKind] = useState<"box" | "furniture" | "flat">(
@@ -116,6 +123,7 @@ export default function BoxForm({
         // Pro fields
         setSku(b.sku ?? "");
         setQuantity(typeof b.quantity === "number" && b.quantity >= 1 ? b.quantity : 1);
+        setHeightFactor(typeof b.heightFactor === "number" ? b.heightFactor : 1);
         // v13: load kind/span
         setKind(b.kind ?? "box");
         setSpanW(b.spanW ?? 1);
@@ -201,6 +209,7 @@ export default function BoxForm({
       color: activeColor,
       sku: sku.trim() || null,
       quantity,
+      heightFactor,
     };
 
     // Branch on scenario: child inside furniture / furniture on plan / flat / normal box
@@ -369,6 +378,7 @@ export default function BoxForm({
 
       {/* Furniture dimensions picker */}
       {kind === "furniture" && !insideFurniture && (
+        <>
         <Field label="Dimensions (cellules)">
           <div className="grid grid-cols-3 gap-2">
             {[1, 2, 3].map((w) => (
@@ -406,6 +416,29 @@ export default function BoxForm({
             Ce meuble occupera une zone de {spanW}×{spanH} cellules sur le plan.
           </p>
         </Field>
+        <Field label="Hauteur 3D">
+          <div className="grid grid-cols-3 gap-2">
+            {[1, 2, 3].map((h) => (
+              <button
+                key={h}
+                type="button"
+                onClick={() => setHeightFactor(h)}
+                className={clsx(
+                  "font-mono text-[10px] uppercase tracking-widest py-2 border-2 transition-all",
+                  heightFactor === h
+                    ? "bg-ink text-paper border-ink"
+                    : "border-ink/30 text-ink/70 hover:border-ink"
+                )}
+              >
+                {"▬".repeat(h)} ×{h}
+              </button>
+            ))}
+          </div>
+          <p className="font-mono text-[9px] uppercase tracking-widest text-ink/50 mt-1.5">
+            Hauteur visuelle du meuble en vue 3D.
+          </p>
+        </Field>
+        </>
       )}
 
       {/* Flat (frame/painting/etc.) specific fields */}
@@ -550,12 +583,49 @@ export default function BoxForm({
       </Field>
 
       <Field label="Tags (séparés par virgule)">
-        <input
-          className="input-field"
-          value={tagsInput}
-          onChange={(e) => setTagsInput(e.target.value)}
-          placeholder="livres, fragile, archive"
-        />
+        <div className="relative">
+          <input
+            className="input-field"
+            value={tagsInput}
+            onChange={(e) => {
+              setTagsInput(e.target.value);
+              const parts = e.target.value.split(",");
+              const last = parts[parts.length - 1].trim().toLowerCase();
+              if (last.length >= 1) {
+                const existing = parts.slice(0, -1).map((p) => p.trim()).filter(Boolean);
+                setTagSuggestions(
+                  allTags.filter(
+                    (t) => t.toLowerCase().startsWith(last) && !existing.includes(t)
+                  ).slice(0, 6)
+                );
+              } else {
+                setTagSuggestions([]);
+              }
+            }}
+            onBlur={() => setTimeout(() => setTagSuggestions([]), 150)}
+            placeholder="livres, fragile, archive"
+          />
+          {tagSuggestions.length > 0 && (
+            <div className="absolute top-full left-0 right-0 z-20 panel !p-1 flex flex-wrap gap-1 mt-0.5">
+              {tagSuggestions.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    const parts = tagsInput.split(",");
+                    parts[parts.length - 1] = ` ${t}`;
+                    setTagsInput(parts.join(",").trimStart() + ", ");
+                    setTagSuggestions([]);
+                  }}
+                  className="font-mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 bg-paper-dark border border-ink/30 hover:border-ink"
+                >
+                  #{t}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </Field>
 
       {kind !== "flat" && (

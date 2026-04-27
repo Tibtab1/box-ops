@@ -114,6 +114,7 @@ export type CellBoxLite = {
   kind: "box" | "furniture" | "flat";
   spanW: number;
   spanH: number;
+  heightFactor?: number;
   // Flat-specific (optional, only set when kind === "flat")
   flatType?: FlatType | null;
   isFragile?: boolean;

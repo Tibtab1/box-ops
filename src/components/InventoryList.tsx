@@ -323,7 +323,7 @@ export default function InventoryList({ boxes, onOpenBox, highlightedId }: Props
             : "Aucun résultat — essayez d'autres filtres."}
         </div>
       ) : (
-        <ul className="space-y-1.5 max-h-[520px] overflow-y-auto pr-1">
+        <ul className="space-y-1.5 max-h-[40vh] sm:max-h-[520px] overflow-y-auto pr-1">
           {filtered.map((b) => {
             const isHighlighted = b.id === highlightedId;
             return (

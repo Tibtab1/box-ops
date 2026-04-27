@@ -510,17 +510,22 @@ export default function HomePage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
             <PlaceSwitcher />
-            <StatPill label="Cellules" value={stats.occupiedCells} sub={`/${stats.occupiedCells + stats.freeCells}`} tone="safety" />
-            <StatPill
-              label="Boîtes"
-              value={stats.filledSlots}
-              sub={`/${stats.totalSlots} max`}
-              tone="blueprint"
-            />
-            <StatPill label="Taux" value={`${stats.pct}%`} tone="ink" />
-            <ExportMenu open={menuOpen} setOpen={setMenuOpen} />
+            {/* Stats — hidden on small screens to keep header compact */}
+            <div className="hidden sm:flex items-center gap-2">
+              <StatPill label="Cellules" value={stats.occupiedCells} sub={`/${stats.occupiedCells + stats.freeCells}`} tone="safety" />
+              <StatPill
+                label="Boîtes"
+                value={stats.filledSlots}
+                sub={`/${stats.totalSlots} max`}
+                tone="blueprint"
+              />
+              <StatPill label="Taux" value={`${stats.pct}%`} tone="ink" />
+            </div>
+            <div className="hidden sm:block">
+              <ExportMenu open={menuOpen} setOpen={setMenuOpen} />
+            </div>
             <UndoButton
               refreshKey={undoRefreshKey}
               onUndone={handleUndone}
@@ -545,10 +550,11 @@ export default function HomePage() {
           />
           <div className="flex items-center gap-2 flex-wrap">
             <TabSwitch current={tab} onChange={(t) => { setTab(t); setSplitView(false); }} />
+            {/* Desktop-only controls */}
             <button
               onClick={() => setSplitView((v) => !v)}
               className={clsx(
-                "font-mono text-[10px] uppercase tracking-widest px-2.5 py-1.5 border-2 border-ink transition-colors whitespace-nowrap",
+                "hidden sm:inline-flex font-mono text-[10px] uppercase tracking-widest px-2.5 py-1.5 border-2 border-ink transition-colors whitespace-nowrap",
                 splitView ? "bg-ink text-paper" : "bg-paper text-ink hover:bg-paper-dark"
               )}
               title="Afficher le plan et l'inventaire côte-à-côte"
@@ -556,28 +562,29 @@ export default function HomePage() {
               ⊞ Vue partagée
             </button>
             {tab === "map" && (
-              <ViewToggle
-                mode={viewMode}
-                onChange={(m) => {
-                  setViewMode(m);
-                  if (m === "3d") {
-                    // Drop any mutating state cleanly
-                    setEditMode(false);
-                    setRightPanel((p) =>
-                      p.kind === "create" || p.kind === "edit" || p.kind === "cell-edit"
-                        ? { kind: "none" }
-                        : p
-                    );
-                    setFocusedCode(null);
-                  }
-                }}
-              />
+              <div className="hidden sm:block">
+                <ViewToggle
+                  mode={viewMode}
+                  onChange={(m) => {
+                    setViewMode(m);
+                    if (m === "3d") {
+                      setEditMode(false);
+                      setRightPanel((p) =>
+                        p.kind === "create" || p.kind === "edit" || p.kind === "cell-edit"
+                          ? { kind: "none" }
+                          : p
+                      );
+                      setFocusedCode(null);
+                    }
+                  }}
+                />
+              </div>
             )}
             {tab === "map" && viewMode === "2d" && (
               <button
                 onClick={() => setShowCrossSection((v) => !v)}
                 className={clsx(
-                  "font-mono text-[10px] uppercase tracking-widest px-2.5 py-1.5 border-2 border-ink transition-colors whitespace-nowrap",
+                  "hidden sm:inline-flex font-mono text-[10px] uppercase tracking-widest px-2.5 py-1.5 border-2 border-ink transition-colors whitespace-nowrap",
                   showCrossSection ? "bg-ink text-paper" : "bg-paper text-ink hover:bg-paper-dark"
                 )}
                 title="Afficher la coupe frontale d'une rangée"
@@ -595,16 +602,12 @@ export default function HomePage() {
               }}
               className={clsx(
                 editMode ? "btn-primary" : "btn-ghost",
-                "whitespace-nowrap",
+                "hidden sm:inline-flex whitespace-nowrap",
                 isReadOnly3D && "opacity-40 cursor-not-allowed"
               )}
-              title={
-                isReadOnly3D
-                  ? "Passez en 2D pour éditer le plan"
-                  : undefined
-              }
+              title={isReadOnly3D ? "Passez en 2D pour éditer le plan" : undefined}
             >
-              {editMode ? "✓ Terminé" : "✎ Éditer le plan"}
+              {editMode ? "✓ Terminé" : "✎ Éditer"}
             </button>
             <button
               disabled={isReadOnly3D}
@@ -616,9 +619,7 @@ export default function HomePage() {
                 "btn-safety whitespace-nowrap",
                 isReadOnly3D && "opacity-40 cursor-not-allowed"
               )}
-              title={
-                isReadOnly3D ? "Passez en 2D pour ajouter une boîte" : undefined
-              }
+              title={isReadOnly3D ? "Passez en 2D pour ajouter une boîte" : undefined}
             >
               + Ajouter
             </button>
@@ -630,17 +631,11 @@ export default function HomePage() {
                 setPendingFlatEdge(null);
               }}
               className={clsx(
-                "whitespace-nowrap font-mono text-[11px] uppercase tracking-widest px-3 py-2 border-2 border-ink transition-all",
+                "hidden sm:inline-flex whitespace-nowrap font-mono text-[11px] uppercase tracking-widest px-3 py-2 border-2 border-ink transition-all",
                 placingFlat ? "bg-ink text-paper" : "bg-paper text-ink hover:bg-paper-dark",
                 isReadOnly3D && "opacity-40 cursor-not-allowed"
               )}
-              title={
-                isReadOnly3D
-                  ? "Passez en 2D pour ajouter un cadre"
-                  : placingFlat
-                  ? "Annuler le placement de cadre"
-                  : "Cliquez ensuite sur une ligne du plan"
-              }
+              title={isReadOnly3D ? "Passez en 2D pour ajouter un cadre" : placingFlat ? "Annuler le placement de cadre" : "Cliquez ensuite sur une ligne du plan"}
               disabled={isReadOnly3D}
             >
               {placingFlat ? "✕ Annuler cadre" : "🖼 + Cadre"}
@@ -777,24 +772,43 @@ export default function HomePage() {
             )}
           </div>
 
-          <RightPanel
-            editMode={editMode}
-            panel={rightPanel}
-            currentCell={currentCell}
-            rowCount={stats.rows}
-            locationsForForm={locationsForForm}
-            refresh={refresh}
-            setPanel={setRightPanel}
-            setFocusedCode={setFocusedCode}
-            boxes={boxes}
-            allTags={allTags}
-            onSaved={handleSaved}
-            readOnly={isReadOnly3D}
-            pendingFlatEdge={pendingFlatEdge}
-            clearPendingFlatEdge={() => setPendingFlatEdge(null)}
-          />
+          {/* Panel: bottom sheet on mobile, sticky column on desktop */}
+          <div className={clsx(
+            "fixed bottom-0 inset-x-0 z-50 max-h-[88vh] overflow-y-auto overscroll-contain",
+            "lg:sticky lg:top-24 lg:self-start lg:space-y-4 lg:z-auto lg:max-h-none lg:overflow-visible lg:inset-x-auto lg:bottom-auto",
+            rightPanel.kind === "none" && !editMode && "hidden"
+          )}>
+            {/* Drag handle — mobile only */}
+            <div className="lg:hidden sticky top-0 z-10 bg-paper border-t-2 border-ink flex justify-center py-2">
+              <div className="w-8 h-1 rounded-full bg-ink/30" />
+            </div>
+            <RightPanel
+              editMode={editMode}
+              panel={rightPanel}
+              currentCell={currentCell}
+              rowCount={stats.rows}
+              locationsForForm={locationsForForm}
+              refresh={refresh}
+              setPanel={setRightPanel}
+              setFocusedCode={setFocusedCode}
+              boxes={boxes}
+              allTags={allTags}
+              onSaved={handleSaved}
+              readOnly={isReadOnly3D}
+              pendingFlatEdge={pendingFlatEdge}
+              clearPendingFlatEdge={() => setPendingFlatEdge(null)}
+            />
+          </div>
         </div>
       </div>
+
+      {/* Backdrop mobile derrière le panel */}
+      {(rightPanel.kind !== "none" || editMode) && (
+        <div
+          className="fixed inset-0 bg-ink/60 z-40 lg:hidden"
+          onClick={() => { if (!editMode) setRightPanel({ kind: "none" }); }}
+        />
+      )}
 
       <footer className="border-t-2 border-dashed border-ink/30 mt-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-5 font-mono text-[10px] uppercase tracking-[0.25em] text-ink/50 flex items-center justify-between flex-wrap gap-2">
@@ -912,7 +926,7 @@ function RightPanel(props: {
   if (!editMode && panel.kind === "none") return null;
 
   return (
-    <div className="lg:sticky lg:top-24 self-start space-y-4">
+    <div className="space-y-4">
       {editMode && (
         <PlanControls rowCount={rowCount} onAction={refresh} />
       )}

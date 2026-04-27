@@ -78,13 +78,16 @@ export default function MapGrid3D({
   const viewBox = useMemo(() => {
     if (cells.length === 0) return { x: -200, y: -200, w: 400, h: 400 };
     const maxStack = Math.max(1, ...cells.map((c) => c.boxes.length));
-    // Account for explode: vertical extension
+    // Account for explode: vertical extension + horizontal spread
     const effectiveStack = maxStack * (1 + explode * 1.5);
+    const maxColOff = (maxStack - 1) * explode * 0.3;
     const pts: Array<{ sx: number; sy: number }> = [];
     for (let r = bounds.minRow; r <= bounds.maxRow + 1; r++) {
       for (let c = bounds.minCol; c <= bounds.maxCol + 1; c++) {
         pts.push(project(c, r, 0));
         pts.push(project(c, r, effectiveStack));
+        pts.push(project(c + maxColOff, r, 0));
+        pts.push(project(c + maxColOff, r, effectiveStack));
       }
     }
     const xs = pts.map((p) => p.sx);
@@ -221,6 +224,7 @@ export default function MapGrid3D({
     depth: number;
     zBottom: number;
     zTop: number;
+    colOff: number;
   };
   type FlatTile = { kind: "flat"; flat: FlatEdgeItem; depth: number };
   type Item = FloorTile | BoxTile | FlatTile;
@@ -234,7 +238,8 @@ export default function MapGrid3D({
   const items: Item[] = useMemo(() => {
     const acc: Item[] = [];
     const boxHeight = 1; // one stack unit per box
-    const gap = explode * 1.5; // gap between layers in stack units
+    const gap = explode * 1.5;       // vertical gap between layers
+    const spread = explode * 0.3;    // horizontal spread per stack level
 
     for (const cell of visibleCells) {
       acc.push({
@@ -245,6 +250,7 @@ export default function MapGrid3D({
       for (let i = 0; i < cell.boxes.length; i++) {
         const zBottom = i * (boxHeight + gap);
         const zTop = zBottom + boxHeight;
+        const colOff = i * spread;
         acc.push({
           kind: "box",
           cell,
@@ -252,6 +258,7 @@ export default function MapGrid3D({
           depth: renderDepth(cell.col, cell.row, i + 1),
           zBottom,
           zTop,
+          colOff,
         });
       }
     }
@@ -464,7 +471,7 @@ export default function MapGrid3D({
             return (
               <BoxCube
                 key={`b-${box.id}`}
-                col={item.cell.col}
+                col={item.cell.col + item.colOff}
                 row={item.cell.row}
                 zBottom={item.zBottom}
                 zTop={item.zTop}

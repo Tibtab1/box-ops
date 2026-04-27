@@ -106,9 +106,7 @@ API /api/locations retourne { cells, flats } (objet, pas array)
 
 \## TODO immédiat
 
-\- Panneau détail spécifique pour les cadres (afficher dimensions cm, valeur, type)
-
-\- Nettoyage auto des cadres orphelins quand cellule supprimée
+\- (vide — tous les TODOs immédiats sont livrés)
 
 
 

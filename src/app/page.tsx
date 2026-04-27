@@ -527,7 +527,7 @@ export default function HomePage() {
               />
               <StatPill label="Taux" value={`${stats.pct}%`} tone="ink" />
             </div>
-            <div className="hidden sm:block">
+            <div className="hidden sm:block" data-tutorial="export">
               <ExportMenu open={menuOpen} setOpen={setMenuOpen} />
             </div>
             <UndoButton
@@ -578,7 +578,7 @@ export default function HomePage() {
               ⊞ Vue partagée
             </button>
             {tab === "map" && (
-              <div className="hidden sm:block">
+              <div className="hidden sm:block" data-tutorial="vue3d">
                 <ViewToggle
                   mode={viewMode}
                   onChange={(m) => {
@@ -609,6 +609,7 @@ export default function HomePage() {
               </button>
             )}
             <button
+              data-tutorial="edition"
               disabled={isReadOnly3D}
               onClick={() => {
                 setEditMode((v) => !v);
@@ -626,6 +627,7 @@ export default function HomePage() {
               {editMode ? "✓ Terminé" : "✎ Éditer"}
             </button>
             <button
+              data-tutorial="ajouter"
               disabled={isReadOnly3D}
               onClick={() => {
                 setEditMode(false);
@@ -640,6 +642,7 @@ export default function HomePage() {
               + Ajouter
             </button>
             <button
+              data-tutorial="cadre"
               onClick={() => {
                 setEditMode(false);
                 setRightPanel({ kind: "none" });

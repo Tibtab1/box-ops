@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requirePlaceAccess } from "@/lib/require-place";
+import { colToLetter } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -70,12 +71,13 @@ async function addCellRight(
   if (!info) return NextResponse.json({ error: "Rangée inexistante." }, { status: 404 });
   const type = body.type === "aisle" ? "aisle" : "cell";
   const slot = await nextFreeSlot(placeId, info.aisle);
+  const newCol = info.maxCol + 1;
   await prisma.location.create({
     data: {
       placeId, userId,
-      code: `${info.aisle}-${slot}`,
+      code: `${colToLetter(newCol)}${body.row}`,
       aisle: info.aisle, slot,
-      row: body.row, col: info.maxCol + 1,
+      row: body.row, col: newCol,
       type, capacity: 20, enabled: true,
     },
   });
@@ -93,19 +95,20 @@ async function addCellLeft(
 
   if (info.minCol > 0) {
     const slot = await nextFreeSlot(placeId, info.aisle);
+    const newCol = info.minCol - 1;
     await prisma.location.create({
       data: {
         placeId, userId,
-        code: `${info.aisle}-${slot}`,
+        code: `${colToLetter(newCol)}${body.row}`,
         aisle: info.aisle, slot,
-        row: body.row, col: info.minCol - 1,
+        row: body.row, col: newCol,
         type, capacity: 20, enabled: true,
       },
     });
     return NextResponse.json({ ok: true });
   }
 
-  // Shift all cells of THIS place to the right by 1
+  // Shift all cells of THIS place to the right by 1 (col 0 needed)
   const allCells = await prisma.location.findMany({
     where: { placeId },
     orderBy: { col: "desc" },
@@ -113,14 +116,14 @@ async function addCellLeft(
   for (const c of allCells) {
     await prisma.location.update({
       where: { id: c.id },
-      data: { col: c.col + 1 },
+      data: { col: c.col + 1, code: `${colToLetter(c.col + 1)}${c.row}` },
     });
   }
   const slot = await nextFreeSlot(placeId, info.aisle);
   await prisma.location.create({
     data: {
       placeId, userId,
-      code: `${info.aisle}-${slot}`,
+      code: `${colToLetter(0)}${body.row}`,
       aisle: info.aisle, slot,
       row: body.row, col: 0,
       type, capacity: 20, enabled: true,
@@ -178,12 +181,13 @@ async function addRow(
   const aisle = `R${newRow}`;
 
   for (let i = 0; i < cells; i++) {
+    const col = startCol + i;
     await prisma.location.create({
       data: {
         placeId, userId,
-        code: `${aisle}-${i + 1}`,
+        code: `${colToLetter(col)}${newRow}`,
         aisle, slot: i + 1,
-        row: newRow, col: startCol + i,
+        row: newRow, col,
         type: "cell", capacity: 20, enabled: true,
       },
     });
@@ -227,24 +231,14 @@ async function removeRow(placeId: string, body: { row: number }) {
 
   const below = await prisma.location.findMany({
     where: { placeId, row: { gt: body.row } },
-    orderBy: [{ row: "asc" }, { slot: "asc" }],
+    orderBy: [{ row: "asc" }, { col: "asc" }],
   });
   for (const l of below) {
     const newRow = l.row - 1;
-    const newAisle = `R${newRow}`;
     await prisma.location.update({
       where: { id: l.id },
-      data: { row: newRow, aisle: newAisle, code: `${newAisle}-${l.slot}__tmp` },
+      data: { row: newRow, aisle: `R${newRow}`, code: `${colToLetter(l.col)}${newRow}` },
     });
-  }
-  for (const l of below) {
-    const fresh = await prisma.location.findUnique({ where: { id: l.id } });
-    if (fresh) {
-      await prisma.location.update({
-        where: { id: l.id },
-        data: { code: fresh.code.replace(/__tmp$/, "") },
-      });
-    }
   }
 
   return NextResponse.json({ ok: true });
@@ -280,7 +274,7 @@ async function resetPlan(
       await prisma.location.create({
         data: {
           placeId, userId,
-          code: `${aisle}-${c + 1}`,
+          code: `${colToLetter(c)}${r}`,
           aisle, slot: c + 1,
           row: r, col: c,
           type: "cell", capacity: 20, enabled: true,

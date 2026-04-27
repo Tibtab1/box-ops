@@ -505,6 +505,7 @@ export default function MapGrid3D({
                   })
                 }
                 onLeave={clearHover}
+                label={box.name}
                 topLabel={
                   item.boxIdx === item.cell.boxes.length - 1 ? box.name : null
                 }
@@ -708,6 +709,7 @@ function BoxCube({
   onLeave,
   topLabel,
   cellLabel,
+  label,
 }: {
   col: number;
   row: number;
@@ -723,6 +725,7 @@ function BoxCube({
   onLeave: () => void;
   topLabel: string | null;
   cellLabel: string | null;
+  label: string | null;
 }) {
   const topPoly = boxTopPolygon(col, row, zTop);
   const frontPoly = boxFrontPolygon(col, row, zBottom, zTop);
@@ -775,12 +778,12 @@ function BoxCube({
       {cellLabel && (
         <text
           x={frontCenter.x}
-          y={frontCenter.y - 4}
+          y={frontCenter.y - (label ? 5 : 2)}
           textAnchor="middle"
           dominantBaseline="middle"
           fontFamily="JetBrains Mono, monospace"
-          fontSize="8"
-          fill="rgba(255,255,255,0.9)"
+          fontSize="7"
+          fill="rgba(255,255,255,0.75)"
           style={{
             pointerEvents: "none",
             userSelect: "none",
@@ -788,6 +791,22 @@ function BoxCube({
           }}
         >
           {cellLabel}
+        </text>
+      )}
+
+      {label && (
+        <text
+          x={frontCenter.x}
+          y={frontCenter.y + (cellLabel ? 5 : 0)}
+          textAnchor="middle"
+          dominantBaseline="middle"
+          fontFamily="Fraunces, serif"
+          fontSize="8"
+          fontWeight="700"
+          fill="rgba(255,255,255,0.95)"
+          style={{ pointerEvents: "none", userSelect: "none" }}
+        >
+          {truncate(label, 10)}
         </text>
       )}
 

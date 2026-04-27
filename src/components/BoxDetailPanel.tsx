@@ -1,9 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import MoveHistory from "./MoveHistory";
 import { FLAT_TYPE_LABELS, type FlatType } from "@/lib/types";
+
+type CommentEntry = {
+  id: string;
+  text: string;
+  userName: string;
+  createdAt: string;
+};
 
 type BoxDetail = {
   id: string;
@@ -80,18 +87,53 @@ export default function BoxDetailPanel({
   const [stack, setStack] = useState<StackEntry[]>([]);
   const [capacity, setCapacity] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [comments, setComments] = useState<CommentEntry[]>([]);
+  const [commentText, setCommentText] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const commentEndRef = useRef<HTMLDivElement | null>(null);
 
   const readOnly = !onEdit && !canDelete;
 
   const load = useCallback(async () => {
-    const res = await fetch(`/api/boxes/${boxId}`);
+    const [res, commentsRes] = await Promise.all([
+      fetch(`/api/boxes/${boxId}`),
+      fetch(`/api/boxes/${boxId}/comments`),
+    ]);
     const data = await res.json();
     setBox(data.box);
     setNeighbors(data.neighbors);
     setStack(data.stack ?? []);
     setCapacity(data.capacity ?? 0);
+    if (commentsRes.ok) {
+      const c = await commentsRes.json();
+      setComments(Array.isArray(c) ? c : []);
+    }
     setLoading(false);
   }, [boxId]);
+
+  async function submitComment(e: React.FormEvent) {
+    e.preventDefault();
+    const text = commentText.trim();
+    if (!text || submitting) return;
+    setSubmitting(true);
+    const res = await fetch(`/api/boxes/${boxId}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (res.ok) {
+      const c = await res.json();
+      setComments((prev) => [...prev, c]);
+      setCommentText("");
+      setTimeout(() => commentEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+    }
+    setSubmitting(false);
+  }
+
+  async function deleteComment(commentId: string) {
+    await fetch(`/api/boxes/${boxId}/comments?commentId=${commentId}`, { method: "DELETE" });
+    setComments((prev) => prev.filter((c) => c.id !== commentId));
+  }
 
   useEffect(() => {
     setLoading(true);
@@ -393,6 +435,71 @@ export default function BoxDetailPanel({
         </div>
       )}
 
+      {/* Comments */}
+      <div className="mb-5">
+        <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-ink/60 mb-2 pb-2 border-b border-dashed border-ink/30 flex items-center justify-between">
+          <span>Commentaires</span>
+          {comments.length > 0 && (
+            <span className="text-ink/40">{comments.length}</span>
+          )}
+        </div>
+        {comments.length > 0 && (
+          <div className="space-y-2 max-h-48 overflow-y-auto mb-3 pr-1">
+            {comments.map((c) => (
+              <div key={c.id} className="group relative p-2 border-2 border-ink/20 bg-paper-dark/30 hover:border-ink/40 transition-colors">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="font-mono text-[9px] uppercase tracking-widest text-ink/60 font-bold">
+                    {c.userName}
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <time className="font-mono text-[8px] text-ink/30" dateTime={c.createdAt}>
+                      {new Date(c.createdAt).toLocaleString("fr-FR", {
+                        day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+                      })}
+                    </time>
+                    <button
+                      type="button"
+                      onClick={() => deleteComment(c.id)}
+                      className="opacity-0 group-hover:opacity-100 font-mono text-[9px] text-ink/40 hover:text-safety transition-opacity"
+                      title="Supprimer"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+                <p className="text-sm text-ink/90 leading-snug break-words">
+                  {renderWithMentions(c.text)}
+                </p>
+              </div>
+            ))}
+            <div ref={commentEndRef} />
+          </div>
+        )}
+        {comments.length === 0 && (
+          <p className="font-mono text-[10px] uppercase tracking-widest text-ink/30 mb-3">
+            Aucun commentaire.
+          </p>
+        )}
+        <form onSubmit={submitComment} className="flex gap-2">
+          <input
+            type="text"
+            value={commentText}
+            onChange={(e) => setCommentText(e.target.value)}
+            placeholder="Ajouter un commentaire… @mention"
+            className="input-field flex-1 !py-1.5 !text-xs"
+            maxLength={1000}
+            disabled={submitting}
+          />
+          <button
+            type="submit"
+            disabled={!commentText.trim() || submitting}
+            className="btn-primary !px-3 !py-1.5 !text-[10px] whitespace-nowrap disabled:opacity-40"
+          >
+            ↵
+          </button>
+        </form>
+      </div>
+
       {/* Action buttons — hidden entirely in read-only */}
       {(onEdit || canDelete) && (
         <div
@@ -414,6 +521,18 @@ export default function BoxDetailPanel({
         </div>
       )}
     </aside>
+  );
+}
+
+function renderWithMentions(text: string) {
+  return text.split(/(@\w+)/g).map((part, i) =>
+    part.startsWith("@") ? (
+      <span key={i} className="text-blueprint font-bold">
+        {part}
+      </span>
+    ) : (
+      <span key={i}>{part}</span>
+    )
   );
 }
 

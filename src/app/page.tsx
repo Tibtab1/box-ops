@@ -24,6 +24,7 @@ import ViewToggle, {
   readStoredViewMode,
   type ViewMode,
 } from "@/components/ViewToggle";
+import CrossSection from "@/components/CrossSection";
 import type { CellView, FlatEdgeItem } from "@/lib/types";
 
 type BoxWithLoc = {
@@ -57,6 +58,7 @@ export default function HomePage() {
   const [flats, setFlats] = useState<FlatEdgeItem[]>([]);
   const [splitView, setSplitView] = useState(false);
   const [highlightedBoxId, setHighlightedBoxId] = useState<string | null>(null);
+  const [showCrossSection, setShowCrossSection] = useState(false);
   // When the user clicks "+ Ajouter Cadre", we enter "placing flat" mode:
   // the plan shows clickable hotspots on each edge. When the user clicks an
   // edge, we open BoxForm in flat-creation mode pre-filled with that edge.
@@ -571,6 +573,18 @@ export default function HomePage() {
                 }}
               />
             )}
+            {tab === "map" && viewMode === "2d" && (
+              <button
+                onClick={() => setShowCrossSection((v) => !v)}
+                className={clsx(
+                  "font-mono text-[10px] uppercase tracking-widest px-2.5 py-1.5 border-2 border-ink transition-colors whitespace-nowrap",
+                  showCrossSection ? "bg-ink text-paper" : "bg-paper text-ink hover:bg-paper-dark"
+                )}
+                title="Afficher la coupe frontale d'une rangée"
+              >
+                ⊙ Coupe
+              </button>
+            )}
             <button
               disabled={isReadOnly3D}
               onClick={() => {
@@ -724,6 +738,18 @@ export default function HomePage() {
                     <div className="panel bg-blueprint text-paper border-ink p-3 font-mono text-[11px] uppercase tracking-[0.2em] text-center">
                       Cliquez une cellule libre ou avec place disponible pour y placer la nouvelle boîte.
                     </div>
+                  )}
+                  {showCrossSection && viewMode === "2d" && (
+                    <CrossSection
+                      cells={cells}
+                      onBoxClick={(id) => {
+                        setRightPanel({ kind: "detail", boxId: id });
+                        setFocusedCode(
+                          boxes.find((b) => b.id === id)?.location?.code ?? null
+                        );
+                      }}
+                      onClose={() => setShowCrossSection(false)}
+                    />
                   )}
                   {!editMode && viewMode === "2d" && (
                     <DistanceMeter
